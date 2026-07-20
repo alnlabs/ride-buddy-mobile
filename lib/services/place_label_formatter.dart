@@ -101,22 +101,42 @@ class PlaceLabelFormatter {
     );
   }
 
-  static String fromTomTom({String? poiName, Map<String, dynamic>? address}) {
-    final freeform = address?['freeformAddress']?.toString();
-    final municipality = _firstNonEmpty([
-      address?['municipality']?.toString(),
-      address?['municipalitySubdivision']?.toString(),
-      address?['localName']?.toString(),
+  /// Short title from Google Places (New) display name + address components.
+  static String fromGoogle({
+    String? displayName,
+    String? formattedAddress,
+    List<dynamic>? addressComponents,
+  }) {
+    String? pick(Set<String> types) {
+      if (addressComponents == null) return null;
+      for (final raw in addressComponents) {
+        if (raw is! Map) continue;
+        final typeList = (raw['types'] as List<dynamic>? ?? []).map((e) => '$e').toSet();
+        if (typeList.intersection(types).isEmpty) continue;
+        final long = raw['longText']?.toString() ?? raw['long_name']?.toString();
+        if (long != null && long.trim().isNotEmpty) return long.trim();
+      }
+      return null;
+    }
+
+    final landmark = displayName?.trim();
+    final area = _firstNonEmpty([
+      pick({'sublocality_level_1', 'sublocality', 'neighborhood'}),
+      pick({'sublocality_level_2'}),
     ]);
-    final street = address?['streetName']?.toString();
+    final city = _firstNonEmpty([
+      pick({'locality'}),
+      pick({'administrative_area_level_3'}),
+      pick({'administrative_area_level_2'}),
+    ]);
     return fromNominatim(
       address: {
-        if (poiName != null) 'amenity': poiName,
-        if (street != null) 'road': street,
-        if (municipality != null) 'city': municipality,
+        if (landmark != null && landmark.isNotEmpty) 'amenity': landmark,
+        if (area != null) 'suburb': area,
+        if (city != null) 'city': city,
       },
-      name: poiName,
-      displayName: freeform ?? poiName,
+      name: landmark,
+      displayName: formattedAddress ?? landmark,
     );
   }
 

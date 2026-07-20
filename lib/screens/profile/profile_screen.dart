@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
-import 'package:ridebuddy/services/home_spotlight_service.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/error_view.dart';
 import 'package:ridebuddy/widgets/common/loading_skeleton.dart';
@@ -60,9 +59,23 @@ class ProfileScreen extends ConsumerWidget {
                 onTap: () => context.push('/profile/view'),
               ),
               const SizedBox(height: 22),
+              const SectionLabel('Ride'),
+              const SizedBox(height: 10),
+              ActionRow(
+                icon: Icons.directions_car_outlined,
+                title: 'My vehicles',
+                subtitle: 'Needed before offering rides',
+                onTap: () => context.push('/profile/vehicles'),
+              ),
+              const SizedBox(height: 22),
               const SectionLabel('App'),
               const SizedBox(height: 10),
-              const _TipsSettingsPanel(),
+              ActionRow(
+                icon: Icons.settings_outlined,
+                title: 'Settings',
+                subtitle: 'Tips, quotes and app preferences',
+                onTap: () => context.push('/profile/settings'),
+              ),
             ],
           ),
         ),
@@ -119,61 +132,6 @@ class _AccountSummaryCard extends StatelessWidget {
                 if (phone != null) Text(phone!, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TipsSettingsPanel extends ConsumerStatefulWidget {
-  const _TipsSettingsPanel();
-
-  @override
-  ConsumerState<_TipsSettingsPanel> createState() => _TipsSettingsPanelState();
-}
-
-class _TipsSettingsPanelState extends ConsumerState<_TipsSettingsPanel> {
-  bool? _enabled;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final enabled = await ref.read(homeSpotlightServiceProvider).tipsEnabled();
-    if (!mounted) return;
-    setState(() => _enabled = enabled);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SoftPanel(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Column(
-        children: [
-          SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-            title: const Text('Show daily tip or quote on Home'),
-            subtitle: const Text('Popup once per day, then pinned on Home'),
-            value: _enabled ?? true,
-            onChanged: _enabled == null
-                ? null
-                : (v) async {
-                    await ref.read(homeSpotlightServiceProvider).setTipsEnabled(v);
-                    setState(() => _enabled = v);
-                  },
-          ),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-            leading: const Icon(Icons.lightbulb_outline_rounded, color: AppTheme.brandOrange),
-            title: const Text('Browse tips & quotes'),
-            subtitle: const Text('App, safety, manners, co-riders & quotes'),
-            trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
-            onTap: () => context.push('/tips'),
           ),
         ],
       ),

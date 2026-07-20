@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
-import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/error_view.dart';
 import 'package:ridebuddy/widgets/common/loading_skeleton.dart';
@@ -46,22 +45,6 @@ class EditProfileScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 18),
-              SoftPanel(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: SwitchListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                  title: const Text('I offer rides'),
-                  subtitle: const Text('Act as host when offering seats'),
-                  value: p.canOfferRides,
-                  activeTrackColor: AppTheme.brandBlue.withOpacity(0.45),
-                  activeColor: AppTheme.brandBlue,
-                  onChanged: (v) async {
-                    await ref.read(rideRepositoryProvider).updateProfile({'canOfferRides': v});
-                    ref.invalidate(profileProvider);
-                  },
-                ),
-              ),
               const SizedBox(height: 22),
               const SectionLabel('Setup'),
               const SizedBox(height: 10),
@@ -96,13 +79,6 @@ class EditProfileScreen extends ConsumerWidget {
                         ? 'Add at least 5 · pick top 5 for posts'
                         : 'Pick your top 5 for ride & need posts',
                 onTap: () => context.push('/profile/interests'),
-              ),
-              const SizedBox(height: 10),
-              ActionRow(
-                icon: Icons.directions_car_outlined,
-                title: 'My vehicles',
-                subtitle: 'Needed before offering rides',
-                onTap: () => context.push('/profile/vehicles'),
               ),
             ],
           ),

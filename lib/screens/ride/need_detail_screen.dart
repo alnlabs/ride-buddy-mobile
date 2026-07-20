@@ -52,7 +52,7 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
       if (!mounted || text.isEmpty) return;
       await showPostShareSheet(
         context,
-        title: 'Share need',
+        title: 'Share request',
         text: text,
         link: link,
       );
@@ -68,11 +68,11 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancel this need?'),
+        title: const Text('Cancel this request?'),
         content: const Text('Hosts won’t see it anymore.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cancel need')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cancel request')),
         ],
       ),
     );
@@ -81,7 +81,7 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
     try {
       await ref.read(rideRepositoryProvider).cancelNeed(need.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Need cancelled')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request cancelled')));
       context.pop();
     } catch (e) {
       if (!mounted) return;
@@ -165,9 +165,11 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
       future: _future,
       builder: (context, snap) {
         final canShare = snap.hasData && snap.data!.need.status == 'open';
+        final isOwnerTitle =
+            snap.hasData && me == snap.data!.need.requesterId;
         return SkyScaffold(
           appBar: AppBar(
-            title: const Text('Seat need'),
+            title: Text(isOwnerTitle ? 'My request' : 'Seat request'),
             actions: [
               if (canShare)
                 IconButton(
@@ -186,7 +188,7 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
                 padding: const EdgeInsets.all(20),
                 child: SoftPanel(
                   child: EmptyState(
-                    title: 'Couldn’t load need',
+                    title: 'Couldn’t load request',
                     subtitle: ref.read(apiClientProvider).messageFrom(snap.error!),
                     actionLabel: 'Retry',
                     onAction: _refresh,
@@ -215,7 +217,7 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
                         if (need.status == 'open')
                           OutlinedButton(
                             onPressed: _acting || !isOwner ? null : () => _cancel(need),
-                            child: const Text('Cancel need'),
+                            child: const Text('Cancel request'),
                           ),
                         if (need.matchedRideId != null) ...[
                           const SizedBox(height: 8),

@@ -14,6 +14,7 @@ import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/empty_state.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/osm_map_view.dart';
+import 'package:ridebuddy/widgets/ride/need_post_card.dart';
 import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 
 class RideHubScreen extends ConsumerStatefulWidget {
@@ -68,17 +69,17 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Get a seat', style: Theme.of(ctx).textTheme.titleLarge),
+              Text('I need a ride', style: Theme.of(ctx).textTheme.titleLarge),
               const SizedBox(height: 4),
               Text(
-                'Search what’s already posted, or ask hosts to offer you one.',
+                'Find someone already going your way, or post so hosts can offer you a seat.',
                 style: Theme.of(ctx).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
               ActionRow(
                 icon: Icons.search_rounded,
-                title: 'Search rides',
-                subtitle: 'Browse open seats on your route',
+                title: 'Browse open rides',
+                subtitle: 'See seats already posted on your route',
                 onTap: () {
                   Navigator.pop(ctx);
                   context.push('/ride/search');
@@ -87,8 +88,8 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
               const SizedBox(height: 10),
               ActionRow(
                 icon: Icons.hail_rounded,
-                title: 'Post a need',
-                subtitle: 'Hosts nearby can offer you a seat',
+                title: 'Ask for a seat',
+                subtitle: 'Tell hosts where you need to go',
                 accent: AppTheme.brandOrange,
                 onTap: () {
                   Navigator.pop(ctx);
@@ -119,7 +120,9 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
               final loading = snap.connectionState != ConnectionState.done;
               final open = data?.openRides ?? const <Ride>[];
               final inboxCount = data?.inbox.length ?? 0;
-              final openNeeds = data?.myNeeds.where((n) => n.status == 'open').length ?? 0;
+              final myAsks = (data?.myNeeds ?? const <RideRequest>[])
+                  .where((n) => n.status == 'open' || n.status == 'matched')
+                  .toList();
 
               return CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -133,7 +136,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                           Text('Ride', style: Theme.of(context).textTheme.headlineMedium),
                           const SizedBox(height: 4),
                           Text(
-                            'Office carpool · share the trip cost',
+                            'Share office trips · split the cost',
                             style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppTheme.inkMuted),
                           ),
                           const SizedBox(height: 18),
@@ -141,8 +144,8 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                             children: [
                               Expanded(
                                 child: _PrimaryTile(
-                                  title: 'Get a seat',
-                                  subtitle: 'As co-rider',
+                                  title: 'I need a ride',
+                                  subtitle: 'Find or ask for a seat',
                                   icon: Icons.airline_seat_recline_normal_rounded,
                                   color: AppTheme.brandBlue,
                                   onTap: _openGetSeatSheet,
@@ -151,8 +154,8 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: _PrimaryTile(
-                                  title: 'Offer seats',
-                                  subtitle: 'As host',
+                                  title: "I'm offering",
+                                  subtitle: 'Share empty seats',
                                   icon: Icons.directions_car_filled_rounded,
                                   color: AppTheme.brandOrange,
                                   onTap: () => context.push('/ride/post'),
@@ -165,59 +168,37 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                             children: [
                               Expanded(
                                 child: _LinkChip(
-                                  icon: Icons.confirmation_number_outlined,
-                                  label: 'My trips',
+                                  icon: Icons.airline_seat_recline_normal_rounded,
+                                  label: 'As a co-rider',
                                   onTap: () => context.push('/ride/trips'),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: _LinkChip(
-                                  icon: Icons.inbox_outlined,
-                                  label: inboxCount > 0 ? 'Needs · $inboxCount' : 'Needs',
+                                  icon: Icons.directions_car_filled_rounded,
+                                  label: inboxCount > 0
+                                      ? 'As a host · $inboxCount'
+                                      : 'As a host',
                                   onTap: () => context.push('/ride/needs'),
                                 ),
                               ),
-                              if (openNeeds > 0) ...[
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: _LinkChip(
-                                    icon: Icons.hail_rounded,
-                                    label: 'Mine · $openNeeds',
-                                    onTap: () => context.push('/ride/needs'),
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
-                          const SizedBox(height: 22),
-                          Row(
-                            children: [
-                              const Expanded(child: SectionLabel('Your open rides')),
-                              _ViewToggle(
-                                mapMode: _mapMode,
-                                onChanged: (map) => setState(() {
-                                  _mapMode = map;
-                                  if (!map) _selectedRideId = null;
-                                }),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
                         ],
                       ),
                     ),
                   ),
                   if (loading)
                     SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child: SoftPanel(child: const LinearProgressIndicator()),
                       ),
                     )
                   else if (snap.hasError)
                     SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child: SoftPanel(
                           child: EmptyState(
@@ -229,43 +210,114 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                         ),
                       ),
                     )
-                  else if (open.isEmpty)
+                  else ...[
                     SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
                       sliver: SliverToBoxAdapter(
-                        child: SoftPanel(
-                          child: EmptyState(
-                            title: 'No open rides yet',
-                            subtitle: 'Offer seats from your vehicle to see them here and on the map',
-                            actionLabel: 'Offer seats',
-                            onAction: () => context.push('/ride/post'),
-                          ),
-                        ),
-                      ),
-                    )
-                  else if (_mapMode)
-                    _buildMapSliver(open, regionAsync)
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-                      sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, i) {
-                            final r = open[i];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: RidePostCard(
-                                ride: r,
-                                isOwner: true,
-                                showChevron: true,
-                                onTap: () => context.push('/ride/detail/${r.id}'),
-                              ),
-                            );
-                          },
-                          childCount: open.length,
+                        child: SectionLabel(
+                          myAsks.isEmpty ? 'My requests' : 'My requests · ${myAsks.length}',
                         ),
                       ),
                     ),
+                    if (myAsks.isEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                        sliver: SliverToBoxAdapter(
+                          child: SoftPanel(
+                            child: EmptyState(
+                              title: 'No open requests',
+                              subtitle: 'Post where you need to go so hosts can offer you a seat',
+                              actionLabel: 'New request',
+                              onAction: () => context.push('/ride/needs/new'),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, i) {
+                              final n = myAsks[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: NeedPostCard(
+                                  need: n,
+                                  isOwner: true,
+                                  showPoster: false,
+                                  showChevron: true,
+                                  statusLabel: n.status,
+                                  onTap: () => context.push('/ride/need/${n.id}'),
+                                ),
+                              );
+                            },
+                            childCount: myAsks.length,
+                          ),
+                        ),
+                      ),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SectionLabel(
+                                open.isEmpty
+                                    ? "Rides you're offering"
+                                    : "Rides you're offering · ${open.length}",
+                              ),
+                            ),
+                            if (open.isNotEmpty)
+                              _ViewToggle(
+                                mapMode: _mapMode,
+                                onChanged: (map) => setState(() {
+                                  _mapMode = map;
+                                  if (!map) _selectedRideId = null;
+                                }),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (open.isEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+                        sliver: SliverToBoxAdapter(
+                          child: SoftPanel(
+                            child: EmptyState(
+                              title: 'No rides offered yet',
+                              subtitle: 'When you host a trip, post empty seats so co-riders can join',
+                              actionLabel: "I'm offering",
+                              onAction: () => context.push('/ride/post'),
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (_mapMode)
+                      _buildMapSliver(open, regionAsync)
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, i) {
+                              final r = open[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: RidePostCard(
+                                  ride: r,
+                                  isOwner: true,
+                                  showChevron: true,
+                                  onTap: () => context.push('/ride/detail/${r.id}'),
+                                ),
+                              );
+                            },
+                            childCount: open.length,
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               );
             },

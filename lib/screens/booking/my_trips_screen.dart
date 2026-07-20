@@ -22,7 +22,7 @@ class MyTripsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(myTripsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('My trips')),
+      appBar: AppBar(title: const Text('As a co-rider')),
       body: async.when(
         loading: () => const LoadingSkeleton(),
         error: (e, _) => ErrorView(

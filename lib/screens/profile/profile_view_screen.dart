@@ -88,14 +88,6 @@ class ProfileViewScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              const SectionLabel('Ride settings'),
-              const SizedBox(height: 10),
-              _InfoPanel(
-                icon: Icons.directions_car_filled_rounded,
-                title: 'Ride mode',
-                body: p.canOfferRides ? 'You can offer rides as a host.' : 'You are currently riding only as a co-rider.',
-              ),
-              const SizedBox(height: 22),
               const SectionLabel('Work'),
               const SizedBox(height: 10),
               _InfoPanel(

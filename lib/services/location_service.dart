@@ -35,7 +35,7 @@ class LocationResult {
   }
 }
 
-/// Location helpers for ride maps / pickup defaults.
+/// Location helpers for ride maps / meet-point defaults.
 class LocationService {
   LocationService._();
 

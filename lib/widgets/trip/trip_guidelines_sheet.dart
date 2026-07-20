@@ -113,7 +113,7 @@ class TripGuidelinesBanner extends StatelessWidget {
     final subtitle = guidelines.hasSharedInterests
         ? 'You share ${guidelines.sharedInterests.length} interest${guidelines.sharedInterests.length == 1 ? '' : 's'} — chat optional'
         : guidelines.isDuringTrip
-            ? 'Pickup, payment & what to expect'
+            ? 'Meet point, payment & what to expect'
             : 'Before you ride — practical & optional connection tips';
 
     return SoftPanel(

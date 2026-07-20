@@ -319,62 +319,136 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
     return false;
   }
 
+  String get _helperCopy {
+    final l = widget.label.trim().toLowerCase();
+    if (l == 'from') return 'Where this trip starts';
+    if (l == 'to') return 'Where this trip ends';
+    return 'Search an area or landmark';
+  }
+
+  String get _hintCopy {
+    if (_savedPicks.isNotEmpty) {
+      return 'Type a place, or pick one of yours below';
+    }
+    return 'e.g. office gate, metro, neighbourhood';
+  }
+
+  IconData get _leadingIcon {
+    final l = widget.label.trim().toLowerCase();
+    if (l == 'from') return Icons.trip_origin_rounded;
+    if (l == 'to') return Icons.flag_rounded;
+    return Icons.place_outlined;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasText = _controller.text.isNotEmpty;
+    final theme = Theme.of(context);
+    final focused = _focused;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: _controller,
-          focusNode: _focus,
-          minLines: 2,
-          maxLines: 3,
-          textInputAction: TextInputAction.search,
-          onSubmitted: (v) => _search(v),
-          onTap: () {
-            _ensureSavedPicks();
-            setState(() {});
-          },
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.35),
-          decoration: InputDecoration(
-            labelText: widget.label,
-            hintText: _savedPicks.isNotEmpty ? 'Tap a saved place or type to search' : 'Search area or landmark',
-            alignLabelWithHint: true,
-            isDense: widget.compact,
-            contentPadding: EdgeInsets.fromLTRB(
-              14,
-              widget.compact ? 12 : 16,
-              8,
-              widget.compact ? 12 : 14,
-            ),
-            suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-            // UnconstrainedBox prevents the multiline field from stretching the spinner.
-            suffixIcon: _loading
-                ? const UnconstrainedBox(
-                    child: Padding(
-                      padding: EdgeInsets.only(right: 10),
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  )
-                : hasText
-                    ? IconButton(
-                        tooltip: 'Clear',
-                        onPressed: clear,
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                        visualDensity: VisualDensity.compact,
-                      )
-                    : null,
+        Text(
+          widget.label,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+            color: AppTheme.ink,
           ),
-          onChanged: (v) {
-            setState(() {});
-            _onChanged(v);
-          },
+        ),
+        const SizedBox(height: 2),
+        Text(
+          _helperCopy,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: AppTheme.inkMuted,
+            height: 1.25,
+          ),
+        ),
+        SizedBox(height: widget.compact ? 8 : 10),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceElevated,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: focused ? AppTheme.brandBlue : AppTheme.line,
+              width: focused ? 1.5 : 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppTheme.brandBlue.withOpacity(0.08),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: TextField(
+            controller: _controller,
+            focusNode: _focus,
+            minLines: 1,
+            maxLines: 3,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (v) => _search(v),
+            onTap: () {
+              _ensureSavedPicks();
+              setState(() {});
+            },
+            style: theme.textTheme.bodyLarge?.copyWith(
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: InputDecoration(
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              hintText: _hintCopy,
+              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                color: AppTheme.inkMuted.withOpacity(0.85),
+                fontWeight: FontWeight.w500,
+              ),
+              isDense: widget.compact,
+              contentPadding: EdgeInsets.fromLTRB(
+                4,
+                widget.compact ? 12 : 14,
+                4,
+                widget.compact ? 12 : 14,
+              ),
+              prefixIcon: Icon(
+                _leadingIcon,
+                size: 22,
+                color: focused ? AppTheme.brandBlue : AppTheme.inkMuted,
+              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 40),
+              suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              suffixIcon: _loading
+                  ? const UnconstrainedBox(
+                      child: Padding(
+                        padding: EdgeInsets.only(right: 10),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  : hasText
+                      ? IconButton(
+                          tooltip: 'Clear',
+                          onPressed: clear,
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          visualDensity: VisualDensity.compact,
+                        )
+                      : null,
+            ),
+            onChanged: (v) {
+              setState(() {});
+              _onChanged(v);
+            },
+          ),
         ),
         Padding(
           padding: const EdgeInsets.only(top: 4),

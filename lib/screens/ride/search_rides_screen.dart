@@ -257,9 +257,9 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
             SoftPanel(
               child: EmptyState(
                 title: 'No rides found',
-                subtitle: 'Post a need so hosts can offer you a seat',
+                subtitle: 'Ask for a seat so hosts can offer you one',
                 icon: Icons.directions_car_outlined,
-                actionLabel: 'Need a ride',
+                actionLabel: 'Ask for a seat',
                 onAction: () => context.push('/ride/needs/new'),
               ),
             ),

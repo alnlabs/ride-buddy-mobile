@@ -196,7 +196,7 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                   ],
                   const SizedBox(height: 12),
                   PlaceSearchField(
-                    label: 'Pickup',
+                    label: 'From',
                     initialText: pickup?.label,
                     onSelected: (p) => setModal(() => pickup = p),
                   ),

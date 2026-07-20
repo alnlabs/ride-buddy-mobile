@@ -19,7 +19,7 @@ class DriveRoute {
   final double distanceMeters;
   /// Estimated travel time including traffic when [usesLiveTraffic] is true.
   final double durationSeconds;
-  /// Extra seconds due to current congestion (TomTom), if known.
+  /// Extra seconds due to current congestion, if known.
   final double trafficDelaySeconds;
   final int index;
   final bool usesLiveTraffic;
@@ -75,16 +75,20 @@ class DriveRoute {
   }
 }
 
-/// Driving routes — prefers TomTom (live traffic), falls back to OSRM.
+/// Driving routes — prefers Google Routes (live traffic), falls back to OSRM.
 /// Always returns up to **3** alternatives sorted by time-to-arrive (fastest first).
 class RoutingService {
-  RoutingService({Dio? tomtom, Dio? osrm})
-      : _tomtom = tomtom ??
+  RoutingService({Dio? google, Dio? osrm})
+      : _google = google ??
             Dio(BaseOptions(
-              baseUrl: 'https://api.tomtom.com',
+              baseUrl: 'https://routes.googleapis.com',
               connectTimeout: const Duration(seconds: 18),
               receiveTimeout: const Duration(seconds: 18),
-              headers: {'Accept': 'application/json'},
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              },
+              validateStatus: (code) => code != null && code >= 200 && code < 500,
             )),
         _osrm = osrm ??
             Dio(BaseOptions(
@@ -97,63 +101,73 @@ class RoutingService {
               },
             ));
 
-  final Dio _tomtom;
+  final Dio _google;
   final Dio _osrm;
 
-  String? get _tomtomKey {
-    final k = dotenv.env['TOMTOM_API_KEY']?.trim();
-    if (k == null || k.isEmpty || k == 'your_tomtom_key') return null;
+  String? get _googleKey {
+    final k = dotenv.env['GOOGLE_MAPS_API_KEY']?.trim();
+    if (k == null || k.isEmpty || k == 'your_google_maps_key') return null;
     return k;
   }
 
-  /// Top 3 routes by travel time (live traffic when TomTom key is set).
+  /// Top 3 routes by travel time (live traffic when Google key is set).
   Future<List<DriveRoute>> routes(LatLng from, LatLng to) async {
-    final key = _tomtomKey;
+    final key = _googleKey;
     if (key != null) {
-      final live = await _tomtomRoutes(from, to, key);
+      final live = await _googleRoutes(from, to, key);
       if (live.isNotEmpty) return live;
     }
     return _osrmRoutes(from, to);
   }
 
-  Future<List<DriveRoute>> _tomtomRoutes(LatLng from, LatLng to, String key) async {
+  Future<List<DriveRoute>> _googleRoutes(LatLng from, LatLng to, String key) async {
     try {
-      final path =
-          '/routing/1/calculateRoute/${from.latitude},${from.longitude}:${to.latitude},${to.longitude}/json';
-      final res = await _tomtom.get(path, queryParameters: {
-        'key': key,
-        'traffic': true,
-        'travelMode': 'car',
-        'routeType': 'fastest',
-        // Primary + up to 2 alternatives → up to 3 total
-        'maxAlternatives': 2,
-        'computeTravelTimeFor': 'all',
-      });
-      final data = res.data;
-      if (data is! Map) return [];
-      final routesJson = data['routes'] as List<dynamic>? ?? [];
+      final res = await _google.post(
+        '/directions/v2:computeRoutes',
+        data: {
+          'origin': {
+            'location': {
+              'latLng': {'latitude': from.latitude, 'longitude': from.longitude},
+            },
+          },
+          'destination': {
+            'location': {
+              'latLng': {'latitude': to.latitude, 'longitude': to.longitude},
+            },
+          },
+          'travelMode': 'DRIVE',
+          'routingPreference': 'TRAFFIC_AWARE',
+          'computeAlternativeRoutes': true,
+          'languageCode': 'en-IN',
+          'regionCode': 'IN',
+          'units': 'METRIC',
+        },
+        options: Options(headers: {
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask':
+              'routes.duration,routes.staticDuration,routes.distanceMeters,'
+              'routes.polyline.encodedPolyline',
+        }),
+      );
+      if (res.statusCode != 200 || res.data is! Map) return [];
+      final routesJson = (res.data as Map)['routes'] as List<dynamic>? ?? [];
       final out = <DriveRoute>[];
       for (final raw in routesJson) {
-        final r = raw as Map<String, dynamic>;
-        final summary = r['summary'] as Map<String, dynamic>? ?? {};
-        final legs = r['legs'] as List<dynamic>? ?? [];
-        final points = <LatLng>[];
-        for (final leg in legs) {
-          final pts = (leg as Map)['points'] as List<dynamic>? ?? [];
-          for (final p in pts) {
-            final m = p as Map<String, dynamic>;
-            points.add(LatLng(
-              (m['latitude'] as num).toDouble(),
-              (m['longitude'] as num).toDouble(),
-            ));
-          }
-        }
+        if (raw is! Map) continue;
+        final encoded = (raw['polyline'] as Map?)?['encodedPolyline']?.toString();
+        if (encoded == null || encoded.isEmpty) continue;
+        final points = _decodePolyline(encoded);
         if (points.length < 2) continue;
+        final durationSec = _parseDurationSeconds(raw['duration']?.toString());
+        final staticSec = _parseDurationSeconds(raw['staticDuration']?.toString());
+        final delay = (durationSec > 0 && staticSec > 0 && durationSec > staticSec)
+            ? durationSec - staticSec
+            : 0.0;
         out.add(DriveRoute(
           points: points,
-          distanceMeters: (summary['lengthInMeters'] as num?)?.toDouble() ?? 0,
-          durationSeconds: (summary['travelTimeInSeconds'] as num?)?.toDouble() ?? 0,
-          trafficDelaySeconds: (summary['trafficDelayInSeconds'] as num?)?.toDouble() ?? 0,
+          distanceMeters: (raw['distanceMeters'] as num?)?.toDouble() ?? 0,
+          durationSeconds: durationSec > 0 ? durationSec : staticSec,
+          trafficDelaySeconds: delay,
           usesLiveTraffic: true,
         ));
       }
@@ -214,5 +228,44 @@ class RoutingService {
           index: i,
         ),
     ];
+  }
+
+  /// Parses Google duration strings like `1234s`.
+  static double _parseDurationSeconds(String? raw) {
+    if (raw == null || raw.isEmpty) return 0;
+    final m = RegExp(r'^(\d+(?:\.\d+)?)s$').firstMatch(raw.trim());
+    if (m != null) return double.tryParse(m.group(1)!) ?? 0;
+    return double.tryParse(raw) ?? 0;
+  }
+
+  /// Decodes a Google encoded polyline into lat/lng points.
+  static List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    var index = 0;
+    var lat = 0;
+    var lng = 0;
+    while (index < encoded.length) {
+      var shift = 0;
+      var result = 0;
+      int b;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lat += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lng += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+
+      points.add(LatLng(lat / 1e5, lng / 1e5));
+    }
+    return points;
   }
 }

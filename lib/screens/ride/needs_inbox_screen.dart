@@ -63,18 +63,18 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
   @override
   Widget build(BuildContext context) {
     return SkyScaffold(
-      appBar: AppBar(title: const Text('Needs')),
+      appBar: AppBar(title: const Text('As a host')),
       child: RefreshIndicator(
         onRefresh: _refresh,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
             Text(
-              'Nearby co-riders who need a seat on your routes, plus your own need posts.',
+              'Co-riders asking for a seat on your routes, plus asks you posted.',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppTheme.inkMuted),
             ),
             const SizedBox(height: 18),
-            const SectionLabel('Nearby need-a-rides'),
+            const SectionLabel('Seat requests near you'),
             const SizedBox(height: 10),
             FutureBuilder<List<NeedInboxItem>>(
               future: _inbox,
@@ -96,9 +96,9 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                 if (list.isEmpty) {
                   return SoftPanel(
                     child: EmptyState(
-                      title: 'No nearby needs',
-                      subtitle: 'Post an open ride to see co-riders needing a seat on your route',
-                      actionLabel: 'Offer a ride',
+                      title: 'No seat requests nearby',
+                      subtitle: 'Offer an open ride to see co-riders asking for a seat on your route',
+                      actionLabel: "I'm offering",
                       onAction: () => context.push('/ride/post'),
                     ),
                   );
@@ -134,10 +134,10 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
             const SizedBox(height: 24),
             Row(
               children: [
-                const Expanded(child: SectionLabel('Your need posts')),
+                const Expanded(child: SectionLabel('My requests')),
                 TextButton(
                   onPressed: () => context.push('/ride/needs/new'),
-                  child: const Text('Post need'),
+                  child: const Text('New request'),
                 ),
               ],
             ),
@@ -151,7 +151,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                 if (snap.hasError) {
                   return SoftPanel(
                     child: EmptyState(
-                      title: 'Couldn’t load needs',
+                      title: 'Couldn’t load requests',
                       subtitle: ref.read(apiClientProvider).messageFrom(snap.error!),
                       actionLabel: 'Retry',
                       onAction: _refresh,
@@ -162,9 +162,9 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                 if (list.isEmpty) {
                   return SoftPanel(
                     child: EmptyState(
-                      title: 'No need posts yet',
+                      title: 'No requests yet',
                       subtitle: 'Post when you need a seat — hosts can offer',
-                      actionLabel: 'Need a ride',
+                      actionLabel: 'New request',
                       onAction: () => context.push('/ride/needs/new'),
                     ),
                   );

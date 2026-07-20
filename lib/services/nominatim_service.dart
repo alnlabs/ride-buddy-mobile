@@ -73,8 +73,8 @@ class PlaceSuggestion {
   }
 }
 
-/// Place search via Nominatim + Photon (+ TomTom when keyed).
-/// Biases to the local area, then keeps results within [kMaxLocalSearchKm].
+/// Place search — prefers Google Places when keyed; falls back to
+/// Nominatim + Photon. Biases locally, caps at [kMaxLocalSearchKm].
 class NominatimService {
   NominatimService() {
     _nominatim = Dio(BaseOptions(
@@ -96,21 +96,22 @@ class NominatimService {
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 12),
     ));
-    _tomtom = Dio(BaseOptions(
-      baseUrl: 'https://api.tomtom.com',
+    _google = Dio(BaseOptions(
+      baseUrl: 'https://places.googleapis.com',
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 12),
-      headers: {'Accept': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      validateStatus: (code) => code != null && code >= 200 && code < 500,
     ));
   }
 
   late final Dio _nominatim;
   late final Dio _photon;
-  late final Dio _tomtom;
+  late final Dio _google;
 
-  String? get _tomtomKey {
-    final k = dotenv.env['TOMTOM_API_KEY']?.trim();
-    if (k == null || k.isEmpty || k == 'your_tomtom_key') return null;
+  String? get _googleKey {
+    final k = dotenv.env['GOOGLE_MAPS_API_KEY']?.trim();
+    if (k == null || k.isEmpty || k == 'your_google_maps_key') return null;
     return k;
   }
 
@@ -125,6 +126,27 @@ class NominatimService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
+
+    final googleKey = _googleKey;
+    if (googleKey != null) {
+      final google = await _searchGoogle(
+        q,
+        key: googleKey,
+        country: country,
+        nearLat: nearLat,
+        nearLng: nearLng,
+        maxDistanceKm: maxDistanceKm,
+      );
+      if (google.isNotEmpty) {
+        return _dedupeFilterSort(
+          google,
+          nearLat,
+          nearLng,
+          maxDistanceKm,
+          query: q,
+        );
+      }
+    }
 
     final tasks = <Future<List<PlaceSuggestion>>>[
       // Soft viewbox (bounded=0) — finds more matches; we distance-filter after
@@ -154,24 +176,147 @@ class NominatimService {
       }
     }
 
-    final key = _tomtomKey;
-    if (key != null && nearLat != null && nearLng != null) {
-      tasks.add(_searchTomtom(
-        q,
-        key: key,
-        nearLat: nearLat,
-        nearLng: nearLng,
-        maxDistanceKm: maxDistanceKm,
-        country: country,
-      ));
-    }
-
     final chunks = await Future.wait(tasks);
     final merged = <PlaceSuggestion>[];
     for (final chunk in chunks) {
       merged.addAll(chunk);
     }
-    return _dedupeFilterSort(merged, nearLat, nearLng, maxDistanceKm);
+    return _dedupeFilterSort(
+      merged,
+      nearLat,
+      nearLng,
+      maxDistanceKm,
+      query: q,
+    );
+  }
+
+  Future<List<PlaceSuggestion>> _searchGoogle(
+    String query, {
+    required String key,
+    required String country,
+    double? nearLat,
+    double? nearLng,
+    required double maxDistanceKm,
+  }) async {
+    try {
+      final session = _sessionToken();
+      final body = <String, dynamic>{
+        'input': query,
+        'includedRegionCodes': [country.toLowerCase()],
+        'languageCode': 'en',
+        'sessionToken': session,
+      };
+      if (nearLat != null && nearLng != null) {
+        body['locationBias'] = {
+          'circle': {
+            'center': {'latitude': nearLat, 'longitude': nearLng},
+            'radius': (maxDistanceKm * 1000).clamp(1000, 50000).toDouble(),
+          },
+        };
+      }
+
+      final auto = await _google.post(
+        '/v1/places:autocomplete',
+        data: body,
+        options: Options(headers: {
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask':
+              'suggestions.placePrediction.place,suggestions.placePrediction.placeId,'
+              'suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
+        }),
+      );
+      if (auto.statusCode != 200 || auto.data is! Map) return [];
+      final suggestions = (auto.data as Map)['suggestions'] as List<dynamic>? ?? [];
+      final placeNames = <String>[];
+      for (final s in suggestions) {
+        if (s is! Map) continue;
+        final pred = s['placePrediction'] as Map<String, dynamic>?;
+        if (pred == null) continue;
+        final resource = pred['place']?.toString();
+        final id = pred['placeId']?.toString();
+        if (resource != null && resource.startsWith('places/')) {
+          placeNames.add(resource);
+        } else if (id != null && id.isNotEmpty) {
+          placeNames.add('places/$id');
+        }
+        if (placeNames.length >= 8) break;
+      }
+      if (placeNames.isEmpty) return [];
+
+      final details = await Future.wait(
+        placeNames.map((name) => _googlePlaceDetails(name, key: key, sessionToken: session)),
+      );
+      return details.whereType<PlaceSuggestion>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<PlaceSuggestion?> _googlePlaceDetails(
+    String placeResourceName, {
+    required String key,
+    required String sessionToken,
+  }) async {
+    try {
+      final path = placeResourceName.startsWith('/') ? placeResourceName : '/v1/$placeResourceName';
+      final res = await _google.get(
+        path,
+        queryParameters: {'sessionToken': sessionToken},
+        options: Options(headers: {
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask':
+              'id,displayName,formattedAddress,location,addressComponents',
+        }),
+      );
+      if (res.statusCode != 200 || res.data is! Map) return null;
+      final m = res.data as Map<String, dynamic>;
+      final loc = m['location'] as Map<String, dynamic>?;
+      final lat = (loc?['latitude'] as num?)?.toDouble();
+      final lng = (loc?['longitude'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      final displayName = (m['displayName'] is Map)
+          ? (m['displayName'] as Map)['text']?.toString()
+          : m['displayName']?.toString();
+      final formatted = m['formattedAddress']?.toString();
+      final components = m['addressComponents'] as List<dynamic>?;
+      return PlaceSuggestion(
+        publicShort: PlaceLabelFormatter.fromGoogle(
+          displayName: displayName,
+          formattedAddress: formatted,
+          addressComponents: components,
+        ),
+        fullAddress: formatted ?? displayName,
+        lat: lat,
+        lng: lng,
+        city: _cityFromGoogleComponents(components),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _sessionToken() {
+    final r = math.Random();
+    String hex(int n) => List.generate(n, (_) => r.nextInt(16).toRadixString(16)).join();
+    return '${hex(8)}-${hex(4)}-4${hex(3)}-${hex(4)}-${hex(12)}';
+  }
+
+  static String? _cityFromGoogleComponents(List<dynamic>? components) {
+    if (components == null) return null;
+    String? pick(Set<String> want) {
+      for (final raw in components) {
+        if (raw is! Map) continue;
+        final types = (raw['types'] as List<dynamic>? ?? []).map((e) => '$e').toSet();
+        if (types.intersection(want).isEmpty) continue;
+        final t = raw['longText']?.toString() ?? raw['long_name']?.toString();
+        if (t != null && t.trim().isNotEmpty) return t.trim();
+      }
+      return null;
+    }
+
+    return pick({'locality'}) ??
+        pick({'administrative_area_level_3'}) ??
+        pick({'administrative_area_level_2'});
   }
 
   Future<List<PlaceSuggestion>> _searchNominatim(
@@ -282,56 +427,6 @@ class NominatimService {
     }
   }
 
-  Future<List<PlaceSuggestion>> _searchTomtom(
-    String query, {
-    required String key,
-    required double nearLat,
-    required double nearLng,
-    required double maxDistanceKm,
-    required String country,
-  }) async {
-    try {
-      final encoded = Uri.encodeComponent(query);
-      final res = await _tomtom.get(
-        '/search/2/search/$encoded.json',
-        queryParameters: {
-          'key': key,
-          'lat': nearLat,
-          'lon': nearLng,
-          'radius': (maxDistanceKm * 1000).round(),
-          'limit': 20,
-          'countrySet': country.toUpperCase(),
-          'typeahead': true,
-          'idxSet': 'POI,PAD,Addr,Str,Geo',
-        },
-      );
-      final data = res.data;
-      if (data is! Map) return [];
-      final results = data['results'] as List<dynamic>? ?? [];
-      return results.map((e) {
-        final m = e as Map<String, dynamic>;
-        final pos = m['position'] as Map<String, dynamic>? ?? {};
-        final addr = m['address'] as Map<String, dynamic>? ?? {};
-        final poi = m['poi'] as Map<String, dynamic>?;
-        final name = poi?['name']?.toString();
-        final freeform = addr['freeformAddress']?.toString();
-        final municipality = addr['municipality']?.toString() ??
-            addr['municipalitySubdivision']?.toString() ??
-            addr['localName']?.toString();
-        final publicShort = PlaceLabelFormatter.fromTomTom(poiName: name, address: addr);
-        return PlaceSuggestion(
-          publicShort: publicShort,
-          fullAddress: freeform ?? publicShort,
-          lat: (pos['lat'] as num?)?.toDouble() ?? 0,
-          lng: (pos['lon'] as num?)?.toDouble() ?? 0,
-          city: municipality,
-        );
-      }).where((p) => p.lat != 0 || p.lng != 0).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
   Future<PlaceSuggestion?> reverse(double lat, double lng) async {
     return reverseDetailed(lat, lng);
   }
@@ -435,8 +530,9 @@ class NominatimService {
     List<PlaceSuggestion> list,
     double? nearLat,
     double? nearLng,
-    double maxDistanceKm,
-  ) {
+    double maxDistanceKm, {
+    String? query,
+  }) {
     final seen = <String>{};
     final unique = <PlaceSuggestion>[];
     for (final p in list) {
@@ -447,16 +543,49 @@ class NominatimService {
       unique.add(p);
     }
 
-    if (nearLat == null || nearLng == null) {
-      return unique.take(15).toList();
+    final q = (query ?? '').trim();
+    final scored = <({PlaceSuggestion p, int text, double dist, int order})>[];
+    for (var i = 0; i < unique.length; i++) {
+      final p = unique[i];
+      final dist = (nearLat != null && nearLng != null)
+          ? distanceKm(nearLat, nearLng, p.lat, p.lng)
+          : 0.0;
+      if (nearLat != null && nearLng != null && dist > maxDistanceKm) continue;
+      scored.add((p: p, text: _textMatchRank(p, q), dist: dist, order: i));
     }
 
-    final withDist = unique
-        .map((p) => (p: p, d: distanceKm(nearLat, nearLng, p.lat, p.lng)))
-        .where((e) => e.d <= maxDistanceKm)
-        .toList()
-      ..sort((a, b) => a.d.compareTo(b.d));
-    return withDist.map((e) => e.p).take(15).toList();
+    // Exact / strong text matches first, then nearer results, then original order.
+    scored.sort((a, b) {
+      final byText = a.text.compareTo(b.text);
+      if (byText != 0) return byText;
+      final byDist = a.dist.compareTo(b.dist);
+      if (byDist != 0) return byDist;
+      return a.order.compareTo(b.order);
+    });
+    return scored.map((e) => e.p).take(15).toList();
+  }
+
+  /// Lower is better: 0 exact, 1 prefix, 2 word-start, 3 contains, 4 tokens, 10 weak.
+  static int _textMatchRank(PlaceSuggestion p, String query) {
+    final q = query.toLowerCase().trim();
+    if (q.isEmpty) return 5;
+    final short = p.publicShort.toLowerCase().trim();
+    final label = p.label.toLowerCase().trim();
+    final full = (p.fullAddress ?? '').toLowerCase().trim();
+    final hay = '$short · $label · $full';
+
+    if (short == q || label == q || full == q) return 0;
+    if (short.startsWith(q) || label.startsWith(q) || full.startsWith(q)) return 1;
+
+    final wordStart = RegExp('(^|\\s|[,·\\-/])${RegExp.escape(q)}');
+    if (wordStart.hasMatch(short) || wordStart.hasMatch(label) || wordStart.hasMatch(full)) {
+      return 2;
+    }
+    if (short.contains(q) || label.contains(q) || full.contains(q)) return 3;
+
+    final tokens = q.split(RegExp(r'\s+')).where((t) => t.length >= 2).toList();
+    if (tokens.isNotEmpty && tokens.every(hay.contains)) return 4;
+    return 10;
   }
 
   static String? _cityFromAddress(Map<String, dynamic>? address) {

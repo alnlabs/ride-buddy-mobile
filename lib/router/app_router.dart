@@ -14,6 +14,7 @@ import 'package:ridebuddy/screens/profile/interests_screen.dart';
 import 'package:ridebuddy/screens/profile/places_screen.dart';
 import 'package:ridebuddy/screens/profile/profile_screen.dart';
 import 'package:ridebuddy/screens/profile/profile_view_screen.dart';
+import 'package:ridebuddy/screens/profile/settings_screen.dart';
 import 'package:ridebuddy/screens/profile/work_screen.dart';
 import 'package:ridebuddy/screens/ride/need_detail_screen.dart';
 import 'package:ridebuddy/screens/ride/needs_inbox_screen.dart';
@@ -152,6 +153,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 GoRoute(path: 'email', builder: (_, __) => const EmailScreen()),
                 GoRoute(path: 'interests', builder: (_, __) => const InterestsScreen()),
                 GoRoute(path: 'vehicles', builder: (_, __) => const VehiclesScreen()),
+                GoRoute(path: 'settings', builder: (_, __) => const SettingsScreen()),
               ],
             ),
           ]),
@@ -326,7 +328,7 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
                           Text('Open Ride', style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: 2),
                           Text(
-                            'Get a seat or offer yours — search, map & trips',
+                            'Need a seat or offering seats — browse, map & trips',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -358,10 +360,18 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
                   const SectionLabel('Quick links'),
                   const SizedBox(height: 10),
                   ActionRow(
-                    icon: Icons.confirmation_number_outlined,
-                    title: 'My trips',
-                    subtitle: 'Bookings as co-rider',
+                    icon: Icons.airline_seat_recline_normal_rounded,
+                    title: 'As a co-rider',
+                    subtitle: 'Your bookings and trips',
                     onTap: () => context.go('/ride/trips'),
+                  ),
+                  const SizedBox(height: 10),
+                  ActionRow(
+                    icon: Icons.directions_car_filled_rounded,
+                    title: 'As a host',
+                    subtitle: 'Seat requests on your route',
+                    accent: AppTheme.brandOrange,
+                    onTap: () => context.go('/ride/needs'),
                   ),
                   const SizedBox(height: 10),
                   ActionRow(

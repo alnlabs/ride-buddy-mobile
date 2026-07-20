@@ -245,16 +245,8 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-Future<void> showAddVehicleSheet(BuildContext context, WidgetRef ref) async {
-  final nick = TextEditingController();
-  final make = TextEditingController();
-  final plate = TextEditingController();
-  final seats = TextEditingController(text: '4');
-  final color = TextEditingController();
-  var saving = false;
-  String? error;
-
-  await showModalBottomSheet<void>(
+Future<void> showAddVehicleSheet(BuildContext context, WidgetRef ref) {
+  return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -262,147 +254,168 @@ Future<void> showAddVehicleSheet(BuildContext context, WidgetRef ref) async {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (ctx) {
-      return StatefulBuilder(
-        builder: (ctx, setModal) {
-          Future<void> save() async {
-            final makeModel = make.text.trim();
-            final plateNumber = plate.text.trim().toUpperCase();
-            if (makeModel.isEmpty || plateNumber.isEmpty) {
-              setModal(() => error = 'Make/model and plate number are required');
-              return;
-            }
-            final seatCount = int.tryParse(seats.text) ?? 0;
-            if (seatCount < 2 || seatCount > 8) {
-              setModal(() => error = 'Seats must be between 2 and 8');
-              return;
-            }
-            setModal(() {
-              saving = true;
-              error = null;
-            });
-            try {
-              await ref.read(rideRepositoryProvider).createVehicle({
-                'nickname': nick.text.trim(),
-                'makeModel': makeModel,
-                'plateNumber': plateNumber,
-                'seats': seatCount,
-                'color': color.text.trim(),
-                'primary': true,
-              });
-              ref.invalidate(vehiclesProvider);
-              if (ctx.mounted) Navigator.pop(ctx);
-            } catch (e) {
-              setModal(() {
-                error = ref.read(apiClientProvider).messageFrom(e);
-                saving = false;
-              });
-            }
-          }
+    builder: (_) => const _AddVehicleSheet(),
+  );
+}
 
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 12,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.line,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Add vehicle', style: Theme.of(ctx).textTheme.headlineSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Used when you offer seats · share trip cost in cash for now',
-                    style: Theme.of(ctx).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 18),
-                  TextField(
-                    controller: nick,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Nickname (optional)',
-                      hintText: 'e.g. Office Honda',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: make,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Make / model',
-                      hintText: 'e.g. Honda City',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: plate,
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\-\s]'))],
-                    decoration: const InputDecoration(
-                      labelText: 'Plate number',
-                      hintText: 'e.g. TS09AB1234',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: seats,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Seats'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: color,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Color',
-                            hintText: 'White',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: 12),
-                    ErrorBanner(error!),
-                  ],
-                  const SizedBox(height: 18),
-                  PrimaryButton(
-                    label: saving ? 'Saving…' : 'Save vehicle',
-                    loading: saving,
-                    icon: Icons.check_rounded,
-                    onPressed: save,
-                  ),
-                ],
+class _AddVehicleSheet extends ConsumerStatefulWidget {
+  const _AddVehicleSheet();
+
+  @override
+  ConsumerState<_AddVehicleSheet> createState() => _AddVehicleSheetState();
+}
+
+class _AddVehicleSheetState extends ConsumerState<_AddVehicleSheet> {
+  final _nick = TextEditingController();
+  final _make = TextEditingController();
+  final _plate = TextEditingController();
+  final _seats = TextEditingController(text: '4');
+  final _color = TextEditingController();
+  var _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nick.dispose();
+    _make.dispose();
+    _plate.dispose();
+    _seats.dispose();
+    _color.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final makeModel = _make.text.trim();
+    final plateNumber = _plate.text.trim().toUpperCase();
+    if (makeModel.isEmpty || plateNumber.isEmpty) {
+      setState(() => _error = 'Make/model and plate number are required');
+      return;
+    }
+    final seatCount = int.tryParse(_seats.text) ?? 0;
+    if (seatCount < 2 || seatCount > 8) {
+      setState(() => _error = 'Seats must be between 2 and 8');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref.read(rideRepositoryProvider).createVehicle({
+        'nickname': _nick.text.trim(),
+        'makeModel': makeModel,
+        'plateNumber': plateNumber,
+        'seats': seatCount,
+        'color': _color.text.trim(),
+        'primary': true,
+      });
+      ref.invalidate(vehiclesProvider);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = ref.read(apiClientProvider).messageFrom(e);
+        _saving = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 12,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.line,
+                  borderRadius: BorderRadius.circular(999),
+                ),
               ),
             ),
-          );
-        },
-      );
-    },
-  );
-
-  nick.dispose();
-  make.dispose();
-  plate.dispose();
-  seats.dispose();
-  color.dispose();
+            const SizedBox(height: 16),
+            Text('Add vehicle', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text(
+              'Used when you offer seats · share trip cost in cash for now',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _nick,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nickname (optional)',
+                hintText: 'e.g. Office Honda',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _make,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Make / model',
+                hintText: 'e.g. Honda City',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _plate,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\-\s]'))],
+              decoration: const InputDecoration(
+                labelText: 'Plate number',
+                hintText: 'e.g. TS09AB1234',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _seats,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Seats'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _color,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Color',
+                      hintText: 'White',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              ErrorBanner(_error!),
+            ],
+            const SizedBox(height: 18),
+            PrimaryButton(
+              label: _saving ? 'Saving…' : 'Save vehicle',
+              loading: _saving,
+              icon: Icons.check_rounded,
+              onPressed: _saving ? null : _save,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
