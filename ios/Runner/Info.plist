@@ -43,6 +43,19 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Ride Buddy uses your location to set pickup and drop points on the map.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.alnlabs.ridebuddy</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ridebuddy</string>
+			</array>
+		</dict>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

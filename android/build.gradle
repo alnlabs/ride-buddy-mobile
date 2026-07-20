@@ -8,15 +8,11 @@ allprojects {
 rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
-    // Plugin modules read flutter.compileSdkVersion before the app applies the Flutter plugin.
-    if (project.name != "app") {
-        project.ext.flutter = [
-            compileSdkVersion: 36,
-            minSdkVersion    : 23,
-            targetSdkVersion : 35,
-            ndkVersion       : "27.0.12077973",
-        ]
-    }
+}
+subprojects {
+    // Ensure :app (and the Flutter Gradle plugin) configure before plugin projects,
+    // so Flutter can safely register pluginProject.afterEvaluate callbacks.
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register("clean", Delete) {

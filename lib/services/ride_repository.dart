@@ -73,6 +73,11 @@ class RideRepository {
     return res.data as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> shareNeed(String id) async {
+    final res = await _api.dio.get('/ride-requests/$id/share');
+    return res.data as Map<String, dynamic>;
+  }
+
   Future<void> cancelRide(String id) async {
     await _api.dio.post('/rides/$id/cancel');
   }
@@ -104,6 +109,30 @@ class RideRepository {
   Future<Profile> updatePlaces(Map<String, dynamic> body) async {
     final res = await _api.dio.put('/profile/me/places', data: body);
     return Profile.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<List<SavedPlace>> savedPlaces() async {
+    final res = await _api.dio.get('/profile/me/saved-places');
+    return (res.data as List).map((e) => SavedPlace.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<SavedPlace> createSavedPlace(Map<String, dynamic> body) async {
+    final res = await _api.dio.post('/profile/me/saved-places', data: body);
+    return SavedPlace.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<SavedPlace> updateSavedPlace(String id, Map<String, dynamic> body) async {
+    final res = await _api.dio.put('/profile/me/saved-places/$id', data: body);
+    return SavedPlace.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<void> deleteSavedPlace(String id) async {
+    await _api.dio.delete('/profile/me/saved-places/$id');
+  }
+
+  Future<SavedPlace> setPrimarySavedPlace(String id) async {
+    final res = await _api.dio.post('/profile/me/saved-places/$id/primary');
+    return SavedPlace.fromJson(res.data as Map<String, dynamic>);
   }
 
   Future<Profile> updateInterests(List<String> tags, {List<String>? topTags}) async {

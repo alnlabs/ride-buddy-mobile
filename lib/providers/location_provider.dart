@@ -3,6 +3,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/services/location_service.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
+import 'package:ridebuddy/services/place_label_formatter.dart';
 
 /// GPS position + city (reverse geocode). Optional — may be null if denied/offline.
 final userLocationProvider = FutureProvider<PlaceSuggestion?>((ref) async {
@@ -25,14 +26,22 @@ final officeMapRegionProvider = FutureProvider<OfficeMapRegion>((ref) async {
         center: LatLng(profile.officeLat!, profile.officeLng!),
         city: city,
         office: PlaceSuggestion(
-          label: profile.officeLabel ?? detailed?.label ?? 'Office',
+          publicShort: PlaceLabelFormatter.shortenStoredLabel(
+            profile.officeLabel ?? detailed?.publicShort ?? 'Office',
+          ),
+          fullAddress: detailed?.fullAddress ?? profile.officeLabel,
+          privateLabel: profile.officeLabel ?? 'Office',
           lat: profile.officeLat!,
           lng: profile.officeLng!,
           city: city,
         ),
         home: profile.homeLat != null
             ? PlaceSuggestion(
-                label: profile.homeLabel ?? 'Home',
+                publicShort: PlaceLabelFormatter.shortenStoredLabel(
+                  profile.homeLabel ?? 'Home',
+                ),
+                fullAddress: profile.homeLabel,
+                privateLabel: profile.homeLabel ?? 'Home',
                 lat: profile.homeLat!,
                 lng: profile.homeLng!,
               )

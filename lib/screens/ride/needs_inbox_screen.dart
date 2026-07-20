@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/empty_state.dart';
-import 'package:ridebuddy/widgets/common/poster_identity.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
+import 'package:ridebuddy/widgets/ride/need_post_card.dart';
 
 class NeedsInboxScreen extends ConsumerStatefulWidget {
   const NeedsInboxScreen({super.key});
@@ -61,11 +60,6 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
     }
   }
 
-  String _short(String label) {
-    if (label.length <= 32) return label;
-    return '${label.substring(0, 30)}…';
-  }
-
   @override
   Widget build(BuildContext context) {
     return SkyScaffold(
@@ -114,48 +108,22 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                     final r = item.request;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: SoftPanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (r.poster != null) ...[
-                              PosterIdentity(poster: r.poster!, roleBadge: 'Needs seat', dense: true),
-                              const SizedBox(height: 10),
-                            ],
-                            Text(
-                              '${_short(r.originLabel)} → ${_short(r.destinationLabel)}',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '${DateFormat.MMMd().add_jm().format(r.departAt)} · '
-                              '${r.seatsNeeded} seat${r.seatsNeeded == 1 ? '' : 's'}'
-                              '${r.comfortPreferred ? ' · Comfort' : ''}',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '~${item.detourKm.toStringAsFixed(1)} km corridor match',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppTheme.inkMuted,
-                                  ),
-                            ),
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: item.alreadyOffered
-                                  ? Text(
-                                      'Offer sent',
-                                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                            color: AppTheme.brandBlue,
-                                          ),
-                                    )
-                                  : FilledButton(
-                                      onPressed: _offering ? null : () => _offer(item),
-                                      child: const Text('Offer my seat'),
-                                    ),
-                            ),
-                          ],
+                      child: NeedPostCard(
+                        need: r,
+                        subtitleExtra: '~${item.detourKm.toStringAsFixed(1)} km corridor',
+                        footer: Align(
+                          alignment: Alignment.centerRight,
+                          child: item.alreadyOffered
+                              ? Text(
+                                  'Offer sent',
+                                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                        color: AppTheme.brandBlue,
+                                      ),
+                                )
+                              : FilledButton(
+                                  onPressed: _offering ? null : () => _offer(item),
+                                  child: const Text('Offer my seat'),
+                                ),
                         ),
                       ),
                     );
@@ -205,22 +173,13 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                   children: list.map((r) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: SoftPanel(
+                      child: NeedPostCard(
+                        need: r,
+                        isOwner: true,
+                        showPoster: false,
+                        showChevron: true,
+                        statusLabel: r.status,
                         onTap: () => context.push('/ride/need/${r.id}'),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${_short(r.originLabel)} → ${_short(r.destinationLabel)}',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '${DateFormat.MMMd().add_jm().format(r.departAt)} · ${r.status}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
                       ),
                     );
                   }).toList(),

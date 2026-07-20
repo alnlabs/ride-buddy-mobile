@@ -7,13 +7,14 @@ import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/location_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
+import 'package:ridebuddy/services/place_label_formatter.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/services/routing_service.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/empty_state.dart';
-import 'package:ridebuddy/widgets/common/poster_identity.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/osm_map_view.dart';
+import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 
 class RideHubScreen extends ConsumerStatefulWidget {
   const RideHubScreen({super.key});
@@ -101,10 +102,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
     );
   }
 
-  String _short(String label, {int max = 28}) {
-    if (label.length <= max) return label;
-    return '${label.substring(0, max - 2)}…';
-  }
+  String _short(String label, {int max = 28}) => PlaceLabelFormatter.shortenStoredLabel(label);
 
   @override
   Widget build(BuildContext context) {
@@ -254,49 +252,13 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
                             final r = open[i];
-                            final when = DateFormat.MMMd().add_jm().format(r.departAt);
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 10),
-                              child: SoftPanel(
+                              child: RidePostCard(
+                                ride: r,
+                                isOwner: true,
+                                showChevron: true,
                                 onTap: () => context.push('/ride/detail/${r.id}'),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.brandOrange.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: const Icon(Icons.route_rounded, color: AppTheme.brandOrange),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          if (r.poster != null) ...[
-                                            PosterIdentity(poster: r.poster!, roleBadge: 'Host', dense: true),
-                                            const SizedBox(height: 8),
-                                          ],
-                                          Text(
-                                            '${_short(r.originLabel)} → ${_short(r.destinationLabel)}',
-                                            style: Theme.of(context).textTheme.titleMedium,
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '$when · ${r.availableSeats} seats'
-                                            '${r.comfortRide ? ' · Comfort' : ''}',
-                                            style: Theme.of(context).textTheme.bodySmall,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          FareChip(pricePerSeat: r.pricePerSeat, compact: true),
-                                        ],
-                                      ),
-                                    ),
-                                    const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
-                                  ],
-                                ),
                               ),
                             );
                           },

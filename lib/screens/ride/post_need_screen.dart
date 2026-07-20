@@ -64,10 +64,18 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
   }
 
   Future<PlaceSuggestion?> _useMyLocation() async {
-    final pos = await LocationService.currentPosition();
-    if (pos == null) return null;
-    final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude);
-    if (place != null && mounted) {
+    final result = await LocationService.currentPositionDetailed();
+    if (!result.isOk) return null;
+    final pos = result.position!;
+    final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude) ??
+        PlaceSuggestion(
+          publicShort: 'Current location',
+          fullAddress:
+              '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
+          lat: pos.latitude,
+          lng: pos.longitude,
+        );
+    if (mounted) {
       setState(() {
         _userCity = place.city;
         _nearLat = pos.latitude;
@@ -116,10 +124,16 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
       final need = await ref.read(rideRepositoryProvider).createNeed({
         'originLat': _from!.lat,
         'originLng': _from!.lng,
-        'originLabel': _from!.label,
+        'originLabel': _from!.publicShort,
+        'originPublicShort': _from!.publicShort,
+        'originFullAddress': _from!.fullAddress,
+        'originPrivateLabel': _from!.privateLabel,
         'destinationLat': _to!.lat,
         'destinationLng': _to!.lng,
-        'destinationLabel': _to!.label,
+        'destinationLabel': _to!.publicShort,
+        'destinationPublicShort': _to!.publicShort,
+        'destinationFullAddress': _to!.fullAddress,
+        'destinationPrivateLabel': _to!.privateLabel,
         'departAt': _depart.toUtc().toIso8601String(),
         'seatsNeeded': _seats,
         'comfortPreferred': _comfort,

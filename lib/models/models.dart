@@ -178,9 +178,13 @@ class Ride {
     required this.originLat,
     required this.originLng,
     required this.originLabel,
+    this.originFullAddress,
+    this.originPrivateLabel,
     required this.destinationLat,
     required this.destinationLng,
     required this.destinationLabel,
+    this.destinationFullAddress,
+    this.destinationPrivateLabel,
     required this.departAt,
     required this.availableSeats,
     required this.pricePerSeat,
@@ -200,9 +204,13 @@ class Ride {
   final double originLat;
   final double originLng;
   final String originLabel;
+  final String? originFullAddress;
+  final String? originPrivateLabel;
   final double destinationLat;
   final double destinationLng;
   final String destinationLabel;
+  final String? destinationFullAddress;
+  final String? destinationPrivateLabel;
   final DateTime departAt;
   final int availableSeats;
   final double pricePerSeat;
@@ -212,6 +220,20 @@ class Ride {
   final double? routeDistanceM;
   final double? routeDurationS;
   final PosterCard? poster;
+
+  String originTitle({required bool isOwner}) {
+    if (isOwner && originPrivateLabel != null && originPrivateLabel!.trim().isNotEmpty) {
+      return originPrivateLabel!.trim();
+    }
+    return originLabel;
+  }
+
+  String destinationTitle({required bool isOwner}) {
+    if (isOwner && destinationPrivateLabel != null && destinationPrivateLabel!.trim().isNotEmpty) {
+      return destinationPrivateLabel!.trim();
+    }
+    return destinationLabel;
+  }
 
   factory Ride.fromJson(Map<String, dynamic> j) {
     List<List<double>>? geometry;
@@ -242,9 +264,13 @@ class Ride {
       originLat: (j['originLat'] as num).toDouble(),
       originLng: (j['originLng'] as num).toDouble(),
       originLabel: j['originLabel'] as String,
+      originFullAddress: j['originFullAddress'] as String?,
+      originPrivateLabel: j['originPrivateLabel'] as String?,
       destinationLat: (j['destinationLat'] as num).toDouble(),
       destinationLng: (j['destinationLng'] as num).toDouble(),
       destinationLabel: j['destinationLabel'] as String,
+      destinationFullAddress: j['destinationFullAddress'] as String?,
+      destinationPrivateLabel: j['destinationPrivateLabel'] as String?,
       departAt: DateTime.parse(j['departAt'] as String).toLocal(),
       availableSeats: j['availableSeats'] as int,
       pricePerSeat: (j['pricePerSeat'] as num).toDouble(),
@@ -309,9 +335,13 @@ class RideRequest {
     required this.originLat,
     required this.originLng,
     required this.originLabel,
+    this.originFullAddress,
+    this.originPrivateLabel,
     required this.destinationLat,
     required this.destinationLng,
     required this.destinationLabel,
+    this.destinationFullAddress,
+    this.destinationPrivateLabel,
     required this.departAt,
     required this.seatsNeeded,
     required this.comfortPreferred,
@@ -326,9 +356,13 @@ class RideRequest {
   final double originLat;
   final double originLng;
   final String originLabel;
+  final String? originFullAddress;
+  final String? originPrivateLabel;
   final double destinationLat;
   final double destinationLng;
   final String destinationLabel;
+  final String? destinationFullAddress;
+  final String? destinationPrivateLabel;
   final DateTime departAt;
   final int seatsNeeded;
   final bool comfortPreferred;
@@ -337,15 +371,33 @@ class RideRequest {
   final String? matchedBookingId;
   final PosterCard? poster;
 
+  String originTitle({required bool isOwner}) {
+    if (isOwner && originPrivateLabel != null && originPrivateLabel!.trim().isNotEmpty) {
+      return originPrivateLabel!.trim();
+    }
+    return originLabel;
+  }
+
+  String destinationTitle({required bool isOwner}) {
+    if (isOwner && destinationPrivateLabel != null && destinationPrivateLabel!.trim().isNotEmpty) {
+      return destinationPrivateLabel!.trim();
+    }
+    return destinationLabel;
+  }
+
   factory RideRequest.fromJson(Map<String, dynamic> j) => RideRequest(
         id: j['id'] as String,
         requesterId: j['requesterId'] as String,
         originLat: (j['originLat'] as num).toDouble(),
         originLng: (j['originLng'] as num).toDouble(),
         originLabel: j['originLabel'] as String,
+        originFullAddress: j['originFullAddress'] as String?,
+        originPrivateLabel: j['originPrivateLabel'] as String?,
         destinationLat: (j['destinationLat'] as num).toDouble(),
         destinationLng: (j['destinationLng'] as num).toDouble(),
         destinationLabel: j['destinationLabel'] as String,
+        destinationFullAddress: j['destinationFullAddress'] as String?,
+        destinationPrivateLabel: j['destinationPrivateLabel'] as String?,
         departAt: DateTime.parse(j['departAt'] as String).toLocal(),
         seatsNeeded: j['seatsNeeded'] as int? ?? 1,
         comfortPreferred: j['comfortPreferred'] as bool? ?? false,
@@ -355,6 +407,39 @@ class RideRequest {
         poster: j['poster'] is Map<String, dynamic>
             ? PosterCard.fromJson(j['poster'] as Map<String, dynamic>)
             : null,
+      );
+}
+
+class SavedPlace {
+  SavedPlace({
+    required this.id,
+    required this.kind,
+    required this.privateLabel,
+    required this.publicShort,
+    this.fullAddress,
+    required this.lat,
+    required this.lng,
+    required this.primary,
+  });
+
+  final String id;
+  final String kind; // home | office
+  final String privateLabel;
+  final String publicShort;
+  final String? fullAddress;
+  final double lat;
+  final double lng;
+  final bool primary;
+
+  factory SavedPlace.fromJson(Map<String, dynamic> j) => SavedPlace(
+        id: j['id'] as String,
+        kind: j['kind'] as String,
+        privateLabel: j['privateLabel'] as String,
+        publicShort: j['publicShort'] as String,
+        fullAddress: j['fullAddress'] as String?,
+        lat: (j['lat'] as num).toDouble(),
+        lng: (j['lng'] as num).toDouble(),
+        primary: j['primary'] as bool? ?? false,
       );
 }
 

@@ -5,11 +5,15 @@ import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/screens/auth/login_screen.dart';
 import 'package:ridebuddy/screens/auth/otp_screen.dart';
 import 'package:ridebuddy/screens/booking/my_trips_screen.dart';
+import 'package:ridebuddy/screens/discover/discover_screen.dart';
+import 'package:ridebuddy/screens/discover/feature_coming_soon_screen.dart';
 import 'package:ridebuddy/screens/home/home_shell.dart';
 import 'package:ridebuddy/screens/profile/email_screen.dart';
+import 'package:ridebuddy/screens/profile/edit_profile_screen.dart';
 import 'package:ridebuddy/screens/profile/interests_screen.dart';
 import 'package:ridebuddy/screens/profile/places_screen.dart';
 import 'package:ridebuddy/screens/profile/profile_screen.dart';
+import 'package:ridebuddy/screens/profile/profile_view_screen.dart';
 import 'package:ridebuddy/screens/profile/work_screen.dart';
 import 'package:ridebuddy/screens/ride/need_detail_screen.dart';
 import 'package:ridebuddy/screens/ride/needs_inbox_screen.dart';
@@ -19,9 +23,14 @@ import 'package:ridebuddy/screens/ride/ride_detail_screen.dart';
 import 'package:ridebuddy/screens/ride/ride_hub_screen.dart';
 import 'package:ridebuddy/screens/ride/search_rides_screen.dart';
 import 'package:ridebuddy/screens/splash_screen.dart';
+import 'package:ridebuddy/screens/tips/tips_screen.dart';
 import 'package:ridebuddy/screens/vehicle/vehicles_screen.dart';
+import 'package:ridebuddy/services/home_spotlight_service.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
+import 'package:ridebuddy/widgets/tips/app_tip_dialog.dart';
+import 'package:ridebuddy/widgets/tips/home_spotlight_card.dart';
+import 'package:ridebuddy/models/home_spotlight.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
 
@@ -34,6 +43,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: _AuthListenable(ref),
     redirect: (context, state) {
       final loc = state.matchedLocation;
+      // Custom-scheme deep links sometimes arrive with an empty host path only.
+      final uri = state.uri;
+      if (uri.scheme == 'ridebuddy') {
+        final path = uri.path.isNotEmpty
+            ? uri.path
+            : '/${uri.host}${uri.path}'.replaceAll('//', '/');
+        if (path.startsWith('/ride/')) {
+          return path + (uri.hasQuery ? '?${uri.query}' : '');
+        }
+      }
 
       if (auth.initializing) {
         return loc == '/' ? null : '/';
@@ -41,6 +60,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       if (auth.isAuthenticated) {
         if (loc == '/' || loc == '/login' || loc.startsWith('/otp')) return '/home';
+        if (loc == '/jobs') return '/discover/jobs';
+        if (loc == '/meetups') return '/discover/meetups';
         return null;
       }
 
@@ -90,16 +111,42 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/jobs', builder: (_, __) => const _ComingSoon(title: 'Jobs')),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/meetups', builder: (_, __) => const _ComingSoon(title: 'Meetups')),
+            GoRoute(
+              path: '/discover',
+              builder: (_, __) => const DiscoverScreen(),
+              routes: [
+                GoRoute(
+                  path: 'jobs',
+                  builder: (_, __) => const FeatureComingSoonScreen(
+                    title: 'Job referrals',
+                    icon: Icons.work_outline_rounded,
+                  ),
+                ),
+                GoRoute(
+                  path: 'meetups',
+                  builder: (_, __) => const FeatureComingSoonScreen(
+                    title: 'Meetups',
+                    icon: Icons.groups_outlined,
+                  ),
+                ),
+                GoRoute(
+                  path: 'podcast',
+                  builder: (_, __) => const FeatureComingSoonScreen(
+                    title: 'Rider podcast',
+                    icon: Icons.podcasts_outlined,
+                    subtitle: 'Commute-friendly episodes — coming soon.',
+                  ),
+                ),
+              ],
+            ),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/profile',
               builder: (_, __) => const ProfileScreen(),
               routes: [
+                GoRoute(path: 'view', builder: (_, __) => const ProfileViewScreen()),
+                GoRoute(path: 'edit', builder: (_, __) => const EditProfileScreen()),
                 GoRoute(path: 'places', builder: (_, __) => const PlacesScreen()),
                 GoRoute(path: 'work', builder: (_, __) => const WorkScreen()),
                 GoRoute(path: 'email', builder: (_, __) => const EmailScreen()),
@@ -110,6 +157,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
         ],
       ),
+      GoRoute(path: '/tips', builder: (_, __) => const TipsScreen()),
     ],
   );
 });
@@ -121,11 +169,79 @@ class _AuthListenable extends ChangeNotifier {
   final Ref _ref;
 }
 
-class _HomeTab extends ConsumerWidget {
+class _HomeTab extends ConsumerStatefulWidget {
   const _HomeTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends ConsumerState<_HomeTab> {
+  bool _bootstrapped = false;
+  HomeSpotlight? _spotlight;
+  bool _showCard = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrapSpotlight());
+  }
+
+  Future<void> _bootstrapSpotlight() async {
+    if (_bootstrapped || !mounted) return;
+    _bootstrapped = true;
+    try {
+      final service = ref.read(homeSpotlightServiceProvider);
+      final spotlight = await service.todaySpotlight();
+      if (!mounted) return;
+      if (spotlight == null) {
+        setState(() {
+          _spotlight = null;
+          _showCard = false;
+        });
+        return;
+      }
+
+      final showCard = await service.shouldShowCard();
+      final showPopup = await service.shouldShowPopup();
+      if (!mounted) return;
+
+      setState(() {
+        _spotlight = spotlight;
+        _showCard = showCard;
+      });
+
+      if (showPopup) {
+        await showHomeSpotlightDialog(
+          context,
+          spotlight: spotlight,
+          onClose: () => service.markPopupShown(),
+        );
+        if (!mounted) return;
+        final stillShow = await service.shouldShowCard();
+        if (!mounted) return;
+        setState(() => _showCard = stillShow);
+      }
+    } catch (e, st) {
+      debugPrint('Home spotlight bootstrap failed: $e');
+      debugPrint('$st');
+    }
+  }
+
+  Future<void> _dismissCard() async {
+    await ref.read(homeSpotlightServiceProvider).dismissCard();
+    if (!mounted) return;
+    setState(() => _showCard = false);
+  }
+
+  Future<void> _openSpotlight() async {
+    final spotlight = _spotlight;
+    if (spotlight == null) return;
+    await showHomeSpotlightDialog(context, spotlight: spotlight);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final auth = ref.watch(authStateProvider);
     final profile = ref.watch(profileProvider);
     final name = auth.displayName?.trim().isNotEmpty == true ? auth.displayName!.trim() : 'there';
@@ -175,6 +291,17 @@ class _HomeTab extends ConsumerWidget {
                 ],
               ),
             ),
+            if (_showCard && _spotlight != null) ...[
+              const SizedBox(height: 18),
+              FadeInUp(
+                delay: const Duration(milliseconds: 60),
+                child: HomeSpotlightCard(
+                  spotlight: _spotlight!,
+                  onDismiss: _dismissCard,
+                  onOpen: _openSpotlight,
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             FadeInUp(
               delay: const Duration(milliseconds: 100),
@@ -244,54 +371,18 @@ class _HomeTab extends ConsumerWidget {
                     accent: AppTheme.brandOrange,
                     onTap: () => context.go('/profile/places'),
                   ),
+                  const SizedBox(height: 10),
+                  ActionRow(
+                    icon: Icons.lightbulb_outline_rounded,
+                    title: 'Tips & quotes',
+                    subtitle: 'Browse tips and daily inspiration',
+                    accent: AppTheme.brandOrange,
+                    onTap: () => context.push('/tips'),
+                  ),
                 ],
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ComingSoon extends StatelessWidget {
-  const _ComingSoon({required this.title});
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return SkyScaffold(
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: AppTheme.brandBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Icon(
-                    title == 'Jobs' ? Icons.work_outline_rounded : Icons.groups_outlined,
-                    size: 34,
-                    color: AppTheme.brandBlue,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(title, style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 8),
-                Text(
-                  'Coming soon — credits & discovery are next.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppTheme.inkMuted),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

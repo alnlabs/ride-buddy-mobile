@@ -31,19 +31,14 @@ class HomeShell extends StatelessWidget {
               label: 'Ride',
             ),
             NavigationDestination(
-              icon: Icon(Icons.work_outline_rounded),
-              selectedIcon: Icon(Icons.work_rounded),
-              label: 'Jobs',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.groups_outlined),
-              selectedIcon: Icon(Icons.groups_rounded),
-              label: 'Meetups',
+              icon: Icon(Icons.explore_outlined),
+              selectedIcon: Icon(Icons.explore_rounded),
+              label: 'Discover',
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline_rounded),
               selectedIcon: Icon(Icons.person_rounded),
-              label: 'Profile',
+              label: 'Account',
             ),
           ],
         ),

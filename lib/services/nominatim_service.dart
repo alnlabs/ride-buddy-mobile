@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:ridebuddy/services/place_label_formatter.dart';
+
 final nominatimServiceProvider = Provider((ref) => NominatimService());
 
 /// Max straight-line distance for place suggestions / local trips (commute app).
@@ -11,16 +13,64 @@ const double kMaxLocalSearchKm = 100;
 
 class PlaceSuggestion {
   PlaceSuggestion({
-    required this.label,
+    required this.publicShort,
     required this.lat,
     required this.lng,
+    this.fullAddress,
+    this.privateLabel,
     this.city,
+    this.savedPlaceId,
+    this.kind,
   });
 
-  final String label;
+  /// Short public area/landmark (what others see on rides).
+  final String publicShort;
+
+  /// Full geocode string; shown when toggled.
+  final String? fullAddress;
+
+  /// Owner-only name (saved home/office or personal nickname).
+  final String? privateLabel;
+
   final double lat;
   final double lng;
   final String? city;
+  final String? savedPlaceId;
+  /// home | office when from saved places.
+  final String? kind;
+
+  /// Field / list title for the current user (private if set).
+  String get label =>
+      (privateLabel != null && privateLabel!.trim().isNotEmpty) ? privateLabel!.trim() : publicShort;
+
+  String displayTitle({required bool isOwner}) {
+    if (isOwner && privateLabel != null && privateLabel!.trim().isNotEmpty) {
+      return privateLabel!.trim();
+    }
+    return publicShort;
+  }
+
+  PlaceSuggestion copyWith({
+    String? publicShort,
+    String? fullAddress,
+    String? privateLabel,
+    double? lat,
+    double? lng,
+    String? city,
+    String? savedPlaceId,
+    String? kind,
+  }) {
+    return PlaceSuggestion(
+      publicShort: publicShort ?? this.publicShort,
+      fullAddress: fullAddress ?? this.fullAddress,
+      privateLabel: privateLabel ?? this.privateLabel,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      city: city ?? this.city,
+      savedPlaceId: savedPlaceId ?? this.savedPlaceId,
+      kind: kind ?? this.kind,
+    );
+  }
 }
 
 /// Place search via Nominatim + Photon (+ TomTom when keyed).
@@ -160,8 +210,15 @@ class NominatimService {
       return data.map((e) {
         final m = e as Map<String, dynamic>;
         final address = m['address'] as Map<String, dynamic>?;
+        final displayName = m['display_name'] as String? ?? 'Unknown';
+        final name = m['name'] as String?;
         return PlaceSuggestion(
-          label: m['display_name'] as String? ?? 'Unknown',
+          publicShort: PlaceLabelFormatter.fromNominatim(
+            address: address,
+            name: name,
+            displayName: displayName,
+          ),
+          fullAddress: displayName,
           lat: double.parse('${m['lat']}'),
           lng: double.parse('${m['lon']}'),
           city: _cityFromAddress(address),
@@ -205,17 +262,16 @@ class NominatimService {
             props['town']?.toString() ??
             props['village']?.toString() ??
             props['county']?.toString();
-        final state = props['state']?.toString();
-        final district = props['district']?.toString() ?? props['county']?.toString();
-        final parts = <String>[
+        final publicShort = PlaceLabelFormatter.fromPhoton(props);
+        final fullParts = <String>[
           if (name != null && name.isNotEmpty) name,
           if (street != null && street.isNotEmpty && street != name) street,
-          if (district != null && district.isNotEmpty && district != city) district,
           if (city != null && city.isNotEmpty) city,
-          if (state != null && state.isNotEmpty) state,
+          if (props['state'] != null) props['state'].toString(),
         ];
         return PlaceSuggestion(
-          label: parts.isNotEmpty ? parts.join(', ') : (name ?? 'Unknown'),
+          publicShort: publicShort,
+          fullAddress: fullParts.isNotEmpty ? fullParts.join(', ') : publicShort,
           lat: lat,
           lng: lng,
           city: city,
@@ -262,12 +318,10 @@ class NominatimService {
         final municipality = addr['municipality']?.toString() ??
             addr['municipalitySubdivision']?.toString() ??
             addr['localName']?.toString();
-        final label = [
-          if (name != null && name.isNotEmpty) name,
-          if (freeform != null && freeform.isNotEmpty && freeform != name) freeform,
-        ].join(', ');
+        final publicShort = PlaceLabelFormatter.fromTomTom(poiName: name, address: addr);
         return PlaceSuggestion(
-          label: label.isNotEmpty ? label : (freeform ?? name ?? 'Unknown'),
+          publicShort: publicShort,
+          fullAddress: freeform ?? publicShort,
           lat: (pos['lat'] as num?)?.toDouble() ?? 0,
           lng: (pos['lon'] as num?)?.toDouble() ?? 0,
           city: municipality,
@@ -295,11 +349,17 @@ class NominatimService {
       );
       if (res.data is! Map) return null;
       final m = res.data as Map<String, dynamic>;
-      final name = m['display_name'] as String?;
-      if (name == null) return null;
+      final displayName = m['display_name'] as String?;
+      if (displayName == null) return null;
       final address = m['address'] as Map<String, dynamic>?;
+      final name = m['name'] as String?;
       return PlaceSuggestion(
-        label: name,
+        publicShort: PlaceLabelFormatter.fromNominatim(
+          address: address,
+          name: name,
+          displayName: displayName,
+        ),
+        fullAddress: displayName,
         lat: lat,
         lng: lng,
         city: _cityFromAddress(address),
@@ -316,14 +376,14 @@ class NominatimService {
         if (features.isEmpty) return null;
         final props = (features.first as Map)['properties'] as Map<String, dynamic>? ?? {};
         final city = props['city']?.toString() ?? props['town']?.toString();
-        final name = props['name']?.toString();
-        final parts = [
-          if (name != null) name,
-          if (city != null) city,
-          if (props['state'] != null) props['state'].toString(),
-        ];
+        final publicShort = PlaceLabelFormatter.fromPhoton(props);
         return PlaceSuggestion(
-          label: parts.join(', '),
+          publicShort: publicShort,
+          fullAddress: [
+            if (props['name'] != null) props['name'].toString(),
+            if (city != null) city,
+            if (props['state'] != null) props['state'].toString(),
+          ].where((e) => e.isNotEmpty).join(', '),
           lat: lat,
           lng: lng,
           city: city,
@@ -381,7 +441,7 @@ class NominatimService {
     final unique = <PlaceSuggestion>[];
     for (final p in list) {
       final key =
-          '${p.label.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim()}|'
+          '${p.publicShort.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim()}|'
           '${p.lat.toStringAsFixed(3)},${p.lng.toStringAsFixed(3)}';
       if (!seen.add(key)) continue;
       unique.add(p);

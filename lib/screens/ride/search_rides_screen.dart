@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/location_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
@@ -10,9 +9,9 @@ import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/empty_state.dart';
-import 'package:ridebuddy/widgets/common/poster_identity.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/place_search_field.dart';
+import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 
 class SearchRidesScreen extends ConsumerStatefulWidget {
   const SearchRidesScreen({super.key});
@@ -79,10 +78,18 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
   }
 
   Future<PlaceSuggestion?> _useMyLocation() async {
-    final pos = await LocationService.currentPosition();
-    if (pos == null) return null;
-    final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude);
-    if (place != null && mounted) {
+    final result = await LocationService.currentPositionDetailed();
+    if (!result.isOk) return null;
+    final pos = result.position!;
+    final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude) ??
+        PlaceSuggestion(
+          publicShort: 'Current location',
+          fullAddress:
+              '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
+          lat: pos.latitude,
+          lng: pos.longitude,
+        );
+    if (mounted) {
       setState(() {
         _userCity = place.city;
         _nearLat = pos.latitude;
@@ -140,11 +147,6 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
       default:
         return 'Nearby';
     }
-  }
-
-  String _short(String label) {
-    if (label.length <= 36) return label;
-    return '${label.substring(0, 34)}…';
   }
 
   @override
@@ -264,47 +266,25 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
           ..._results.map((r) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: SoftPanel(
+              child: RidePostCard(
+                ride: r,
                 onTap: () => context.push(
-                      '/ride/detail/${r.id}${_comfortOnly ? '?preferComfort=1' : ''}',
+                  '/ride/detail/${r.id}${_comfortOnly ? '?preferComfort=1' : ''}',
+                ),
+                badge: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.brandBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _badge(r.commuteMatchType),
+                    style: const TextStyle(
+                      color: AppTheme.brandBlue,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
                     ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (r.poster != null) ...[
-                      PosterIdentity(poster: r.poster!, roleBadge: 'Host', dense: true),
-                      const SizedBox(height: 10),
-                    ],
-                    Text(
-                      '${_short(r.originLabel)} → ${_short(r.destinationLabel)}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${DateFormat.MMMd().add_jm().format(r.departAt)} · '
-                      '${r.availableSeats} seats'
-                      '${r.comfortRide ? ' · Comfort' : (_comfortOnly ? ' · Compact' : '')}',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 10),
-                    FareChip(pricePerSeat: r.pricePerSeat, compact: true),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.brandBlue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _badge(r.commuteMatchType),
-                        style: const TextStyle(
-                          color: AppTheme.brandBlue,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             );

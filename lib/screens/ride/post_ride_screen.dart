@@ -9,6 +9,7 @@ import 'package:ridebuddy/screens/vehicle/vehicles_screen.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/location_service.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
+import 'package:ridebuddy/services/place_label_formatter.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/services/routing_service.dart';
 import 'package:ridebuddy/services/seat_price_estimator.dart';
@@ -68,15 +69,34 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
     try {
       final region = await ref.read(officeMapRegionProvider.future);
       if (!mounted) return;
+      List<SavedPlace> saved = [];
+      try {
+        saved = await ref.read(rideRepositoryProvider).savedPlaces();
+      } catch (_) {}
+      if (!mounted) return;
+      SavedPlace? primaryHome;
+      SavedPlace? primaryOffice;
+      for (final p in saved) {
+        if (p.kind == 'home' && (primaryHome == null || p.primary)) primaryHome = p;
+        if (p.kind == 'office' && (primaryOffice == null || p.primary)) primaryOffice = p;
+      }
       setState(() {
         _userCity = region.city;
         _nearLat = region.lat;
         _nearLng = region.lng;
-        if (region.home != null) _from = region.home;
-        if (region.office != null) _to = region.office;
+        if (primaryHome != null) {
+          _from = _fromSaved(primaryHome);
+        } else if (region.home != null) {
+          _from = region.home;
+        }
+        if (primaryOffice != null) {
+          _to = _fromSaved(primaryOffice);
+        } else if (region.office != null) {
+          _to = region.office;
+        }
       });
       _syncFromField();
-      final to = region.office;
+      final to = _to;
       if (to != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _toKey.currentState?.applyPlace(to);
@@ -102,6 +122,16 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
       if (mounted) setState(() => _error = ref.read(apiClientProvider).messageFrom(e));
     }
   }
+
+  PlaceSuggestion _fromSaved(SavedPlace p) => PlaceSuggestion(
+        publicShort: p.publicShort,
+        fullAddress: p.fullAddress,
+        privateLabel: p.privateLabel,
+        lat: p.lat,
+        lng: p.lng,
+        savedPlaceId: p.id,
+        kind: p.kind,
+      );
 
   bool get _comfort => _backSeatMode.isComfort;
 
@@ -311,10 +341,16 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
         'comfortRide': _comfort,
         'originLat': _from!.lat,
         'originLng': _from!.lng,
-        'originLabel': _from!.label,
+        'originLabel': _from!.publicShort,
+        'originPublicShort': _from!.publicShort,
+        'originFullAddress': _from!.fullAddress,
+        'originPrivateLabel': _from!.privateLabel,
         'destinationLat': _to!.lat,
         'destinationLng': _to!.lng,
-        'destinationLabel': _to!.label,
+        'destinationLabel': _to!.publicShort,
+        'destinationPublicShort': _to!.publicShort,
+        'destinationFullAddress': _to!.fullAddress,
+        'destinationPrivateLabel': _to!.privateLabel,
         'departAt': _depart.toUtc().toIso8601String(),
         'availableSeats': seats,
         'pricePerSeat': double.tryParse(_price.text) ?? 0,
@@ -341,10 +377,18 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   Future<PlaceSuggestion?> _useMyLocation() async {
     setState(() => _locating = true);
     try {
-      final pos = await LocationService.currentPosition();
-      if (pos == null) return null;
-      final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude);
-      if (place != null && mounted) {
+      final result = await LocationService.currentPositionDetailed();
+      if (!result.isOk) return null;
+      final pos = result.position!;
+      final place = await ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude) ??
+          PlaceSuggestion(
+            publicShort: 'Current location',
+            fullAddress:
+                '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
+            lat: pos.latitude,
+            lng: pos.longitude,
+          );
+      if (mounted) {
         setState(() {
           _userCity = place.city;
           _nearLat = pos.latitude;
@@ -420,10 +464,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
     }
   }
 
-  String _short(String label) {
-    if (label.length <= 36) return label;
-    return '${label.substring(0, 34)}…';
-  }
+  String _short(String label) => PlaceLabelFormatter.shortenStoredLabel(label);
 
   @override
   Widget build(BuildContext context) {

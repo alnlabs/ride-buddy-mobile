@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/models/trip_guidelines.dart';
@@ -12,17 +10,16 @@ import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/services/routing_service.dart';
-import 'package:ridebuddy/services/whatsapp_share.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/comfort_booking.dart';
 import 'package:ridebuddy/widgets/common/error_view.dart';
 import 'package:ridebuddy/widgets/common/loading_skeleton.dart';
-import 'package:ridebuddy/widgets/common/poster_identity.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/osm_map_view.dart';
 import 'package:ridebuddy/widgets/maps/place_search_field.dart';
+import 'package:ridebuddy/widgets/ride/post_share_sheet.dart';
+import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 import 'package:ridebuddy/widgets/trip/trip_guidelines_sheet.dart';
-import 'package:share_plus/share_plus.dart';
 
 class RideDetailScreen extends ConsumerStatefulWidget {
   const RideDetailScreen({
@@ -103,7 +100,6 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       setState(() => _displayRoute = saved);
       return;
     }
-    // Older rides (or failed save) — resolve a live driving path for display.
     setState(() => _routing = true);
     try {
       final list = await ref.read(routingServiceProvider).routes(
@@ -126,115 +122,11 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       final text = (payload['text'] as String?)?.trim() ?? '';
       final link = (payload['link'] as String?)?.trim() ?? '';
       if (!mounted || text.isEmpty) return;
-
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: AppTheme.surfaceElevated,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (ctx) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppTheme.line,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Share ride', style: Theme.of(ctx).textTheme.headlineSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'Preview of the WhatsApp message',
-                  style: Theme.of(ctx).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 14),
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.of(ctx).size.height * 0.42,
-                  ),
-                  child: SoftPanel(
-                    padding: const EdgeInsets.all(14),
-                    child: SingleChildScrollView(
-                      child: SelectableText(
-                        text,
-                        style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
-                              color: AppTheme.ink,
-                              height: 1.45,
-                            ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                PrimaryButton(
-                  label: 'Share on WhatsApp',
-                  icon: Icons.chat_rounded,
-                  backgroundColor: const Color(0xFF25D366),
-                  onPressed: () async {
-                    await shareTextToWhatsApp(text);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: text));
-                          if (ctx.mounted) {
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              const SnackBar(content: Text('Message copied')),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.copy_rounded, size: 18),
-                        label: const Text('Copy text'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: link.isEmpty
-                            ? null
-                            : () async {
-                                await Clipboard.setData(ClipboardData(text: link));
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(content: Text('Link copied')),
-                                  );
-                                }
-                              },
-                        icon: const Icon(Icons.link_rounded, size: 18),
-                        label: const Text('Copy link'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () async {
-                    await SharePlus.instance.share(ShareParams(text: text));
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  child: const Text('More apps…'),
-                ),
-              ],
-            ),
-          );
-        },
+      await showPostShareSheet(
+        context,
+        title: 'Share ride',
+        text: text,
+        link: link,
       );
     } catch (e) {
       if (!mounted) return;
@@ -253,8 +145,20 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
     );
     if (!proceed || !mounted) return;
 
-    PlaceSuggestion? pickup = PlaceSuggestion(label: ride.originLabel, lat: ride.originLat, lng: ride.originLng);
-    PlaceSuggestion? drop = PlaceSuggestion(label: ride.destinationLabel, lat: ride.destinationLat, lng: ride.destinationLng);
+    PlaceSuggestion? pickup = PlaceSuggestion(
+      publicShort: ride.originLabel,
+      fullAddress: ride.originFullAddress,
+      privateLabel: ride.originPrivateLabel,
+      lat: ride.originLat,
+      lng: ride.originLng,
+    );
+    PlaceSuggestion? drop = PlaceSuggestion(
+      publicShort: ride.destinationLabel,
+      fullAddress: ride.destinationFullAddress,
+      privateLabel: ride.destinationPrivateLabel,
+      lat: ride.destinationLat,
+      lng: ride.destinationLng,
+    );
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -268,7 +172,12 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                   durationSeconds: ride.routeDurationS,
                 );
             return Padding(
-              padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(ctx).viewInsets.bottom + 16),
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -306,15 +215,6 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                       OsmMapView.pin(LatLng(drop!.lat, drop!.lng), color: AppTheme.brandOrange),
                     ],
                     routes: ridePath != null ? [ridePath] : const [],
-                    polylines: ridePath != null
-                        ? const []
-                        : [
-                            Polyline(
-                              points: [LatLng(pickup!.lat, pickup!.lng), LatLng(drop!.lat, drop!.lng)],
-                              color: AppTheme.brandBlue,
-                              strokeWidth: 3,
-                            ),
-                          ],
                   ),
                   const SizedBox(height: 12),
                   ElevatedButton(
@@ -362,59 +262,90 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       appBar: AppBar(
         title: const Text('Ride details'),
         actions: [
-          IconButton(onPressed: _share, icon: const Icon(Icons.share)),
+          IconButton(
+            tooltip: 'Share',
+            onPressed: _share,
+            icon: const Icon(Icons.ios_share_rounded),
+          ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: [
-          if (r.poster != null) ...[
-            SoftPanel(
-              child: PosterIdentity(poster: r.poster!, roleBadge: 'Host'),
+          RidePostCard(
+            ride: r,
+            isOwner: isHost,
+            compact: false,
+            emphasizeFare: true,
+            footer: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (r.commuteMatchType != null)
+                  Text(
+                    'Match: ${r.commuteMatchType}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
+                  ),
+                if (path != null && path.distanceMeters > 0) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Path · ${path.distanceLabel} · ${path.durationLabel}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
+                  ),
+                ],
+                Text(
+                  'Office carpool · cash seat share (not a taxi)',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-          ],
-          Text('${r.originLabel} → ${r.destinationLabel}', style: Theme.of(context).textTheme.titleMedium),
-          Text(DateFormat.yMMMd().add_jm().format(r.departAt)),
-          Text('${r.availableSeats} seats available'
-              '${r.comfortRide ? ' · Comfort (2 in back)' : ' · Standard'}'),
-          if (r.commuteMatchType != null) Text('Match: ${r.commuteMatchType}'),
-          if (path != null && path.distanceMeters > 0)
-            Text('Path · ${path.distanceLabel} · ${path.durationLabel}'),
-          const SizedBox(height: 12),
-          FareChip(pricePerSeat: r.pricePerSeat, emphasize: true),
+          ),
           if (_guidelines != null) ...[
             const SizedBox(height: 12),
             TripGuidelinesBanner(guidelines: _guidelines!),
           ],
           const SizedBox(height: 12),
-          OsmMapView(
-            center: origin,
-            height: 240,
-            fitToMarkers: true,
-            markers: [
-              OsmMapView.pin(origin),
-              OsmMapView.pin(dest, color: AppTheme.brandOrange),
-            ],
-            routes: path != null ? [path] : const [],
-            polylines: path != null
-                ? const []
-                : [
-                    Polyline(points: [origin, dest], color: AppTheme.brandBlue, strokeWidth: 4),
-                  ],
-          ),
-          if (_routing)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: LinearProgressIndicator(),
+          SoftPanel(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  child: OsmMapView(
+                    center: origin,
+                    height: 240,
+                    fitToMarkers: true,
+                    markers: [
+                      OsmMapView.pin(origin),
+                      OsmMapView.pin(dest, color: AppTheme.brandOrange),
+                    ],
+                    routes: path != null ? [path] : const [],
+                    polylines: path != null
+                        ? const []
+                        : [
+                            Polyline(points: [origin, dest], color: AppTheme.brandBlue, strokeWidth: 4),
+                          ],
+                  ),
+                ),
+                if (_routing) const LinearProgressIndicator(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Map © OpenStreetMap',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          const SizedBox(height: 8),
-          Text('Map © OpenStreetMap', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          ),
           const SizedBox(height: 16),
           if (!isHost)
-            ElevatedButton(
+            PrimaryButton(
+              label: _myBooking != null ? 'Seat ${_myBooking!.status}' : 'Request seat',
+              icon: Icons.event_seat_rounded,
               onPressed: r.status == 'open' && (_myBooking == null) ? _book : null,
-              child: Text(_myBooking != null ? 'Seat ${_myBooking!.status}' : 'Request seat'),
             ),
           if (isHost) ...[
             OutlinedButton(
@@ -425,40 +356,49 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
               },
               child: const Text('Cancel ride'),
             ),
-            const SizedBox(height: 12),
-            const Text('Booking requests', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Text('Booking requests', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
             FutureBuilder(
               future: ref.read(rideRepositoryProvider).bookingsForRide(r.id),
               builder: (context, snap) {
-                if (!snap.hasData) return const LinearProgressIndicator();
+                if (!snap.hasData) return const SoftPanel(child: LinearProgressIndicator());
                 final list = snap.data!;
-                if (list.isEmpty) return const Text('No requests yet');
+                if (list.isEmpty) {
+                  return const SoftPanel(child: Text('No requests yet'));
+                }
                 return Column(
                   children: list.map((b) {
-                    return ListTile(
-                      title: Text('${b.status} · ${b.seatsRequested} seat(s)'),
-                      subtitle: Text('${b.pickupLabel} → ${b.dropLabel}'),
-                      trailing: b.status == 'requested'
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.check, color: Colors.green),
-                                  onPressed: () async {
-                                    await ref.read(rideRepositoryProvider).decideBooking(b.id, true);
-                                    _load();
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close, color: Colors.red),
-                                  onPressed: () async {
-                                    await ref.read(rideRepositoryProvider).decideBooking(b.id, false);
-                                    _load();
-                                  },
-                                ),
-                              ],
-                            )
-                          : null,
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SoftPanel(
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${b.status} · ${b.seatsRequested} seat(s)'),
+                          subtitle: Text('${b.pickupLabel} → ${b.dropLabel}'),
+                          trailing: b.status == 'requested'
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.check, color: Colors.green),
+                                      onPressed: () async {
+                                        await ref.read(rideRepositoryProvider).decideBooking(b.id, true);
+                                        _load();
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.close, color: Colors.red),
+                                      onPressed: () async {
+                                        await ref.read(rideRepositoryProvider).decideBooking(b.id, false);
+                                        _load();
+                                      },
+                                    ),
+                                  ],
+                                )
+                              : null,
+                        ),
+                      ),
                     );
                   }).toList(),
                 );

@@ -31,13 +31,15 @@ Flutter app for **Ride Buddy** — employee carpool, job referrals, and meetups 
 
 ## Product vision
 
-Three major features under one brand:
+Core product pillars under one brand:
 
 | Feature | Credits? | Payments |
 |---------|----------|----------|
 | **Ride** (main) | No | Razorpay / cash |
 | **Job Referrals** | Yes | — |
 | **Meetups** | Yes | — |
+| **Rider Podcast** | No | — (content / sponsorship later) |
+| **App tips** | No | — |
 
 **Audience:** Employees — office carpool, job referrals, shared interests.
 
@@ -162,6 +164,8 @@ ride-buddy-mobile/
 - **WhatsApp share:** formatted ride/job/meetup links
 - **SOS:** active trip safety actions
 - **Settings:** feedback, feature request, report bug, About ALNLabs, legal, delete account
+- **Rider Podcast:** listen during commute (list + player; deep-link from active trip / Ride hub)
+- **App-open tips:** lightweight popup suggestions on launch (dismiss / “don’t show again”; respect seen state)
 
 ---
 
@@ -192,6 +196,16 @@ ride-buddy-mobile/
 | **11** | Meetups + Connect Engine UI |
 | **12** | Credits wallet UI |
 | **13** | Job referrals UI + cash redemption |
+| **14** | Rider Podcast — episode list, in-app / external player, entry from Ride hub & active trip |
+| **15** | App-open tips & suggestions popup — fetch tips, show once per tip, settings to reset / disable |
+
+### Address / places (enhancement — not a numbered phase yet)
+
+Tracked separately from core phases; implement when prioritized:
+
+- Multi home + multi office (private labels for owner only)
+- Public short area/landmark on rides; toggle full address for everyone
+- Owner sees private labels on own rides; others never see private names
 
 ---
 
