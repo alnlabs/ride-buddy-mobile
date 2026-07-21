@@ -79,7 +79,21 @@ class AppTheme {
           foregroundColor: Colors.white,
           elevation: 0,
           shadowColor: Colors.transparent,
-          minimumSize: const Size.fromHeight(52),
+          // Finite width — Size.fromHeight(h) is Size(infinity, h) and breaks Row children.
+          minimumSize: const Size(0, 52),
+          maximumSize: const Size(double.infinity, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: brandBlue,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          minimumSize: const Size(0, 52),
+          maximumSize: const Size(double.infinity, 52),
           padding: const EdgeInsets.symmetric(horizontal: 20),
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -88,7 +102,9 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: brandBlue,
-          minimumSize: const Size.fromHeight(52),
+          minimumSize: const Size(0, 52),
+          maximumSize: const Size(double.infinity, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
           side: const BorderSide(color: brandBlue, width: 1.4),
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

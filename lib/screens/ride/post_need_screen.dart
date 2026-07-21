@@ -10,6 +10,7 @@ import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/place_search_field.dart';
+import 'package:ridebuddy/widgets/ride/recurrence_picker.dart';
 
 class PostNeedScreen extends ConsumerStatefulWidget {
   const PostNeedScreen({super.key});
@@ -30,6 +31,11 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
   bool _comfort = false;
   bool _saving = false;
   String? _error;
+  bool _recurring = false;
+  RecurrenceFrequency _frequency = RecurrenceFrequency.weekdays;
+  Set<int> _days = {1, 2, 3, 4, 5};
+  int _dayOfMonth = DateTime.now().day;
+  TimeOfDay _departTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1)));
 
   @override
   void initState() {
@@ -86,11 +92,12 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
   }
 
   Future<void> _pickWhen() async {
+    final now = DateTime.now();
     final date = await showDatePicker(
       context: context,
-      initialDate: _depart,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
+      initialDate: _depart.isBefore(now) ? now : _depart,
+      firstDate: now,
+      lastDate: now.add(const Duration(hours: 24)),
     );
     if (date == null || !mounted) return;
     final time = await showTimePicker(
@@ -100,7 +107,14 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
     if (time == null || !mounted) return;
     setState(() {
       _depart = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _departTime = time;
     });
+  }
+
+  Future<void> _pickRecurringTime() async {
+    final time = await showTimePicker(context: context, initialTime: _departTime);
+    if (time == null || !mounted) return;
+    setState(() => _departTime = time);
   }
 
   Future<void> _submit() async {
@@ -116,12 +130,20 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
       );
       return;
     }
+    if (_recurring &&
+        (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays) &&
+        _days.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick at least one day')),
+      );
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      final need = await ref.read(rideRepositoryProvider).createNeed({
+      final places = {
         'originLat': _from!.lat,
         'originLng': _from!.lng,
         'originLabel': _from!.publicShort,
@@ -134,12 +156,33 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
         'destinationPublicShort': _to!.publicShort,
         'destinationFullAddress': _to!.fullAddress,
         'destinationPrivateLabel': _to!.privateLabel,
-        'departAt': _depart.toUtc().toIso8601String(),
-        'seatsNeeded': _seats,
-        'comfortPreferred': _comfort,
-      });
-      if (!mounted) return;
-      context.pushReplacement('/ride/need/${need.id}');
+      };
+      if (_recurring) {
+        await ref.read(rideRepositoryProvider).createSchedule({
+          'kind': 'need',
+          'frequency': _frequency.apiValue,
+          if (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays)
+            'daysOfWeek': _days.toList()..sort(),
+          if (_frequency == RecurrenceFrequency.monthly) 'dayOfMonth': _dayOfMonth,
+          'departLocalTime':
+              '${_departTime.hour.toString().padLeft(2, '0')}:${_departTime.minute.toString().padLeft(2, '0')}:00',
+          'timezone': 'Asia/Kolkata',
+          'seatsNeeded': _seats,
+          'comfortPreferred': _comfort,
+          ...places,
+        });
+        if (!mounted) return;
+        context.go('/ride/schedules');
+      } else {
+        final need = await ref.read(rideRepositoryProvider).createNeed({
+          ...places,
+          'departAt': _depart.toUtc().toIso8601String(),
+          'seatsNeeded': _seats,
+          'comfortPreferred': _comfort,
+        });
+        if (!mounted) return;
+        context.pushReplacement('/ride/need/${need.id}');
+      }
     } catch (e) {
       setState(() => _error = ref.read(apiClientProvider).messageFrom(e));
     } finally {
@@ -162,7 +205,7 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
           PlaceSearchField(
             key: _fromKey,
             label: 'From',
-            initialText: _from?.label,
+            initialText: _from?.fieldLabel,
             searchCity: _userCity,
             nearLat: _nearLat,
             nearLng: _nearLng,
@@ -172,36 +215,51 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
           const SizedBox(height: 10),
           PlaceSearchField(
             label: 'To',
-            initialText: _to?.label,
+            initialText: _to?.fieldLabel,
             searchCity: _userCity,
             nearLat: _from?.lat ?? _nearLat,
             nearLng: _from?.lng ?? _nearLng,
             onSelected: (p) => setState(() => _to = p),
           ),
           const SizedBox(height: 12),
-          SoftPanel(
-            onTap: _pickWhen,
-            child: Row(
-              children: [
-                const Icon(Icons.schedule_rounded, color: AppTheme.brandBlue),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('When', style: Theme.of(context).textTheme.labelLarge),
-                      const SizedBox(height: 2),
-                      Text(
-                        DateFormat.MMMd().add_jm().format(_depart),
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
-              ],
-            ),
+          RecurrencePicker(
+            recurring: _recurring,
+            onRecurringChanged: (v) => setState(() => _recurring = v),
+            frequency: _frequency,
+            onFrequencyChanged: (f) => setState(() => _frequency = f),
+            selectedDays: _days,
+            onDaysChanged: (d) => setState(() => _days = d),
+            dayOfMonth: _dayOfMonth,
+            onDayOfMonthChanged: (d) => setState(() => _dayOfMonth = d),
+            departTime: _departTime,
+            onDepartTimePressed: _pickRecurringTime,
           ),
+          if (!_recurring) ...[
+            const SizedBox(height: 12),
+            SoftPanel(
+              onTap: _pickWhen,
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, color: AppTheme.brandBlue),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('When', style: Theme.of(context).textTheme.labelLarge),
+                        const SizedBox(height: 2),
+                        Text(
+                          DateFormat.MMMd().add_jm().format(_depart),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           SoftPanel(
             child: Column(
@@ -238,7 +296,9 @@ class _PostNeedScreenState extends ConsumerState<PostNeedScreen> {
           ],
           const SizedBox(height: 18),
           PrimaryButton(
-            label: _saving ? 'Posting…' : 'Post need',
+            label: _saving
+                ? 'Saving…'
+                : (_recurring ? 'Save schedule' : 'Post request'),
             loading: _saving,
             icon: Icons.hail_rounded,
             onPressed: _submit,

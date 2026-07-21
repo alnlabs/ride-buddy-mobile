@@ -6,7 +6,8 @@ import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/place_label_formatter.dart';
 
 /// GPS position + city (reverse geocode). Optional — may be null if denied/offline.
-final userLocationProvider = FutureProvider<PlaceSuggestion?>((ref) async {
+final userLocationProvider = FutureProvider.autoDispose<PlaceSuggestion?>((ref) async {
+  ref.watch(authStateProvider.select((s) => s.userId));
   final pos = await LocationService.currentPosition();
   if (pos == null) return null;
   return ref.read(nominatimServiceProvider).reverseDetailed(pos.latitude, pos.longitude);
@@ -14,38 +15,55 @@ final userLocationProvider = FutureProvider<PlaceSuggestion?>((ref) async {
 
 /// Default map region from profile office (city + coordinates).
 /// Falls back to GPS, then Hyderabad.
-final officeMapRegionProvider = FutureProvider<OfficeMapRegion>((ref) async {
+final officeMapRegionProvider = FutureProvider.autoDispose<OfficeMapRegion>((ref) async {
+  ref.watch(authStateProvider.select((s) => s.userId));
   final nominatim = ref.read(nominatimServiceProvider);
 
   try {
     final profile = await ref.watch(profileProvider.future);
     if (profile.officeLat != null && profile.officeLng != null) {
-      final detailed = await nominatim.reverseDetailed(profile.officeLat!, profile.officeLng!);
-      final city = detailed?.city ?? _cityGuessFromLabel(profile.officeLabel);
+      final officeDetailed = await nominatim.reverseDetailed(profile.officeLat!, profile.officeLng!);
+      final city = officeDetailed?.city ?? _cityGuessFromLabel(profile.officeLabel);
+
+      PlaceSuggestion? home;
+      if (profile.homeLat != null && profile.homeLng != null) {
+        final homeDetailed = await nominatim.reverseDetailed(profile.homeLat!, profile.homeLng!);
+        final homePrivate = (profile.homeLabel != null && profile.homeLabel!.trim().isNotEmpty)
+            ? profile.homeLabel!.trim()
+            : 'Home';
+        home = PlaceSuggestion(
+          // Area/landmark for the field — never force the word "Home" here.
+          publicShort: homeDetailed?.publicShort ??
+              PlaceLabelFormatter.shortenStoredLabel(
+                homeDetailed?.fullAddress ?? profile.homeLabel ?? 'Home',
+              ),
+          fullAddress: homeDetailed?.fullAddress ?? profile.homeLabel,
+          privateLabel: homePrivate,
+          lat: profile.homeLat!,
+          lng: profile.homeLng!,
+          kind: 'home',
+        );
+      }
+
+      final officePrivate = (profile.officeLabel != null && profile.officeLabel!.trim().isNotEmpty)
+          ? profile.officeLabel!.trim()
+          : 'Office';
       return OfficeMapRegion(
         center: LatLng(profile.officeLat!, profile.officeLng!),
         city: city,
         office: PlaceSuggestion(
-          publicShort: PlaceLabelFormatter.shortenStoredLabel(
-            profile.officeLabel ?? detailed?.publicShort ?? 'Office',
-          ),
-          fullAddress: detailed?.fullAddress ?? profile.officeLabel,
-          privateLabel: profile.officeLabel ?? 'Office',
+          publicShort: officeDetailed?.publicShort ??
+              PlaceLabelFormatter.shortenStoredLabel(
+                officeDetailed?.fullAddress ?? profile.officeLabel ?? 'Office',
+              ),
+          fullAddress: officeDetailed?.fullAddress ?? profile.officeLabel,
+          privateLabel: officePrivate,
           lat: profile.officeLat!,
           lng: profile.officeLng!,
           city: city,
+          kind: 'office',
         ),
-        home: profile.homeLat != null
-            ? PlaceSuggestion(
-                publicShort: PlaceLabelFormatter.shortenStoredLabel(
-                  profile.homeLabel ?? 'Home',
-                ),
-                fullAddress: profile.homeLabel,
-                privateLabel: profile.homeLabel ?? 'Home',
-                lat: profile.homeLat!,
-                lng: profile.homeLng!,
-              )
-            : null,
+        home: home,
         source: OfficeMapRegionSource.office,
       );
     }

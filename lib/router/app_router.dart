@@ -5,6 +5,8 @@ import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/screens/auth/login_screen.dart';
 import 'package:ridebuddy/screens/auth/otp_screen.dart';
 import 'package:ridebuddy/screens/booking/my_trips_screen.dart';
+import 'package:ridebuddy/screens/chat/chat_inbox_screen.dart';
+import 'package:ridebuddy/screens/chat/chat_thread_screen.dart';
 import 'package:ridebuddy/screens/discover/discover_screen.dart';
 import 'package:ridebuddy/screens/discover/feature_coming_soon_screen.dart';
 import 'package:ridebuddy/screens/home/home_shell.dart';
@@ -16,13 +18,15 @@ import 'package:ridebuddy/screens/profile/profile_screen.dart';
 import 'package:ridebuddy/screens/profile/profile_view_screen.dart';
 import 'package:ridebuddy/screens/profile/settings_screen.dart';
 import 'package:ridebuddy/screens/profile/work_screen.dart';
+import 'package:ridebuddy/screens/ride/available_rides_screen.dart';
+import 'package:ridebuddy/screens/ride/find_co_riders_screen.dart';
 import 'package:ridebuddy/screens/ride/need_detail_screen.dart';
 import 'package:ridebuddy/screens/ride/needs_inbox_screen.dart';
-import 'package:ridebuddy/screens/ride/post_need_screen.dart';
 import 'package:ridebuddy/screens/ride/post_ride_screen.dart';
 import 'package:ridebuddy/screens/ride/ride_detail_screen.dart';
 import 'package:ridebuddy/screens/ride/ride_hub_screen.dart';
 import 'package:ridebuddy/screens/ride/search_rides_screen.dart';
+import 'package:ridebuddy/screens/ride/schedules_screen.dart';
 import 'package:ridebuddy/screens/splash_screen.dart';
 import 'package:ridebuddy/screens/tips/tips_screen.dart';
 import 'package:ridebuddy/screens/vehicle/vehicles_screen.dart';
@@ -36,13 +40,17 @@ import 'package:ridebuddy/models/home_spotlight.dart';
 final _rootKey = GlobalKey<NavigatorState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(authStateProvider);
+  // Do not watch auth here — recreating GoRouter resets to initialLocation and
+  // briefly flashes /login while OTP verify is still in progress.
+  final authRefresh = _AuthListenable(ref);
+  ref.onDispose(authRefresh.dispose);
 
   return GoRouter(
     navigatorKey: _rootKey,
     initialLocation: '/',
-    refreshListenable: _AuthListenable(ref),
+    refreshListenable: authRefresh,
     redirect: (context, state) {
+      final auth = ref.read(authStateProvider);
       final loc = state.matchedLocation;
       // Custom-scheme deep links sometimes arrive with an empty host path only.
       final uri = state.uri;
@@ -95,10 +103,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 GoRoute(path: 'search', builder: (_, __) => const SearchRidesScreen()),
                 GoRoute(path: 'post', builder: (_, __) => const PostRideScreen()),
                 GoRoute(path: 'needs', builder: (_, __) => const NeedsInboxScreen()),
-                GoRoute(path: 'needs/new', builder: (_, __) => const PostNeedScreen()),
+                GoRoute(path: 'needs/new', builder: (_, __) => const SearchRidesScreen()),
+                GoRoute(
+                  path: 'available/:needId',
+                  builder: (_, state) => AvailableRidesScreen(
+                    needId: state.pathParameters['needId']!,
+                  ),
+                ),
+                GoRoute(
+                  path: 'co-riders/:rideId',
+                  builder: (_, state) => FindCoRidersScreen(
+                    rideId: state.pathParameters['rideId']!,
+                  ),
+                ),
                 GoRoute(
                   path: 'need/:id',
-                  builder: (_, state) => NeedDetailScreen(requestId: state.pathParameters['id']!),
+                  builder: (_, state) => NeedDetailScreen(
+                    requestId: state.pathParameters['id']!,
+                    initialMatchesMap: state.uri.queryParameters['map'] == '1',
+                  ),
                 ),
                 GoRoute(
                   path: 'detail/:id',
@@ -108,6 +131,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   ),
                 ),
                 GoRoute(path: 'trips', builder: (_, __) => const MyTripsScreen()),
+                GoRoute(path: 'schedules', builder: (_, __) => const SchedulesScreen()),
               ],
             ),
           ]),
@@ -154,12 +178,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 GoRoute(path: 'interests', builder: (_, __) => const InterestsScreen()),
                 GoRoute(path: 'vehicles', builder: (_, __) => const VehiclesScreen()),
                 GoRoute(path: 'settings', builder: (_, __) => const SettingsScreen()),
+                GoRoute(path: 'messages', builder: (_, __) => const ChatInboxScreen()),
               ],
             ),
           ]),
         ],
       ),
       GoRoute(path: '/tips', builder: (_, __) => const TipsScreen()),
+      GoRoute(path: '/chat', builder: (_, __) => const ChatInboxScreen()),
+      GoRoute(
+        path: '/chat/:id',
+        builder: (_, state) => ChatThreadScreen(conversationId: state.pathParameters['id']!),
+      ),
     ],
   );
 });
@@ -168,6 +198,7 @@ class _AuthListenable extends ChangeNotifier {
   _AuthListenable(this._ref) {
     _ref.listen(authStateProvider, (_, __) => notifyListeners());
   }
+
   final Ref _ref;
 }
 

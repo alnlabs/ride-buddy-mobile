@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ridebuddy/models/models.dart';
+import 'package:ridebuddy/providers/auth_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
+import 'package:ridebuddy/screens/profile/profile_screen.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
@@ -20,6 +23,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
   late Future<List<NeedInboxItem>> _inbox;
   late Future<List<RideRequest>> _myNeeds;
   bool _offering = false;
+  String? _loadedForUserId;
 
   @override
   void initState() {
@@ -31,11 +35,17 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
     final repo = ref.read(rideRepositoryProvider);
     _inbox = repo.needsInbox();
     _myNeeds = repo.myNeeds();
+    _loadedForUserId = ref.read(authStateProvider).userId;
   }
 
   Future<void> _refresh() async {
     setState(_reload);
     await Future.wait([_inbox, _myNeeds]);
+  }
+
+  Future<void> _openAndRefresh(String location) async {
+    await context.push(location);
+    if (mounted) await _refresh();
   }
 
   Future<void> _offer(NeedInboxItem item) async {
@@ -46,6 +56,8 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
             rideId: item.suggestedRideId,
           );
       if (!mounted) return;
+      bumpRideData(ref);
+      ref.invalidate(seatRequestCountProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Offer sent — waiting for co-rider')),
       );
@@ -62,6 +74,16 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(authStateProvider.select((s) => s.userId), (prev, next) {
+      if (prev == next || next == _loadedForUserId) return;
+      setState(_reload);
+    });
+
+    ref.listen<int>(rideDataRevisionProvider, (prev, next) {
+      if (prev == next) return;
+      _refresh();
+    });
+
     return SkyScaffold(
       appBar: AppBar(title: const Text('As a host')),
       child: RefreshIndicator(
@@ -99,7 +121,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                       title: 'No seat requests nearby',
                       subtitle: 'Offer an open ride to see co-riders asking for a seat on your route',
                       actionLabel: "I'm offering",
-                      onAction: () => context.push('/ride/post'),
+                      onAction: () => _openAndRefresh('/ride/post'),
                     ),
                   );
                 }
@@ -136,7 +158,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
               children: [
                 const Expanded(child: SectionLabel('My requests')),
                 TextButton(
-                  onPressed: () => context.push('/ride/needs/new'),
+                  onPressed: () => _openAndRefresh('/ride/needs/new'),
                   child: const Text('New request'),
                 ),
               ],
@@ -165,7 +187,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                       title: 'No requests yet',
                       subtitle: 'Post when you need a seat — hosts can offer',
                       actionLabel: 'New request',
-                      onAction: () => context.push('/ride/needs/new'),
+                      onAction: () => _openAndRefresh('/ride/needs/new'),
                     ),
                   );
                 }
@@ -179,7 +201,7 @@ class _NeedsInboxScreenState extends ConsumerState<NeedsInboxScreen> {
                         showPoster: false,
                         showChevron: true,
                         statusLabel: r.status,
-                        onTap: () => context.push('/ride/need/${r.id}'),
+                        onTap: () => _openAndRefresh('/ride/need/${r.id}'),
                       ),
                     );
                   }).toList(),

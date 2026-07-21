@@ -207,10 +207,15 @@ class _PlacesScreenState extends ConsumerState<PlacesScreen> {
                 if (_mapLat != null && _mapLng != null) ...[
                   const SizedBox(height: 12),
                   SoftPanel(
+                    padding: EdgeInsets.zero,
                     child: SizedBox(
                       height: 200,
+                      width: double.infinity,
                       child: OsmMapView(
                         center: LatLng(_mapLat!, _mapLng!),
+                        height: 200,
+                        fitToMarkers: true,
+                        fitPadding: const EdgeInsets.all(24),
                         markers: markers,
                       ),
                     ),
@@ -248,7 +253,23 @@ class _PlacesScreenState extends ConsumerState<PlacesScreen> {
               children: [
                 Icon(
                   place.kind == 'home' ? Icons.home_outlined : Icons.apartment_outlined,
-                  color: AppTheme.brandBlue,
+                  color: place.kind == 'home' ? AppTheme.brandOrange : AppTheme.brandBlue,
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: (place.kind == 'home' ? AppTheme.brandOrange : AppTheme.brandBlue)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    place.kind == 'home' ? 'Home' : 'Office',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: place.kind == 'home' ? AppTheme.brandOrange : AppTheme.brandBlue,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -397,8 +418,8 @@ class _PlaceEditorSheetState extends State<_PlaceEditorSheet> {
           children: [
             Text(
               widget.existing == null
-                  ? 'Add ${widget.kind == 'home' ? 'home' : 'office'}'
-                  : 'Edit ${widget.kind}',
+                  ? 'Add ${widget.kind == 'home' ? 'Home' : 'Office'}'
+                  : 'Edit ${widget.kind == 'home' ? 'Home' : 'Office'}',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
@@ -406,7 +427,10 @@ class _PlaceEditorSheetState extends State<_PlaceEditorSheet> {
               controller: _name,
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
-                labelText: widget.kind == 'home' ? 'Private name (e.g. Mom’s place)' : 'Office name (e.g. Mindspace)',
+                labelText: widget.kind == 'home'
+                    ? 'Private name (only you see this)'
+                    : 'Private name (only you see this)',
+                hintText: widget.kind == 'home' ? 'e.g. Mom’s place' : 'e.g. Mindspace',
               ),
             ),
             const SizedBox(height: 12),
@@ -416,6 +440,7 @@ class _PlaceEditorSheetState extends State<_PlaceEditorSheet> {
               searchCity: widget.searchCity,
               nearLat: widget.nearLat,
               nearLng: widget.nearLng,
+              loadSavedPlaces: false,
               onSelected: (p) => setState(() {
                 _place = p;
                 _error = null;

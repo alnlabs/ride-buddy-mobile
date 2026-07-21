@@ -192,6 +192,11 @@ class RideRepository {
     return (res.data as List).map((e) => NeedInboxItem.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  Future<List<NeedInboxItem>> rideMatchingNeeds(String rideId) async {
+    final res = await _api.dio.get('/rides/$rideId/matching-needs');
+    return (res.data as List).map((e) => NeedInboxItem.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   Future<RideOffer> offerSeat({required String requestId, required String rideId}) async {
     final res = await _api.dio.post('/ride-offers', data: {
       'requestId': requestId,
@@ -217,5 +222,30 @@ class RideRepository {
   Future<TripGuidelines> tripGuidelinesForBooking(String bookingId) async {
     final res = await _api.dio.get('/bookings/$bookingId/trip-guidelines');
     return TripGuidelines.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<RideSchedule> createSchedule(Map<String, dynamic> body) async {
+    final res = await _api.dio.post('/ride-schedules', data: body);
+    return RideSchedule.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<List<RideSchedule>> mySchedules() async {
+    final res = await _api.dio.get('/ride-schedules/mine');
+    return (res.data as List).map((e) => RideSchedule.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<RideSchedule> pauseSchedule(String id) async {
+    final res = await _api.dio.post('/ride-schedules/$id/pause');
+    return RideSchedule.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<RideSchedule> resumeSchedule(String id) async {
+    final res = await _api.dio.post('/ride-schedules/$id/resume');
+    return RideSchedule.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<RideSchedule> cancelSchedule(String id) async {
+    final res = await _api.dio.post('/ride-schedules/$id/cancel');
+    return RideSchedule.fromJson(res.data as Map<String, dynamic>);
   }
 }

@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ridebuddy/models/models.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
 
 final authStateProvider = StateNotifierProvider<AuthController, AuthState>((ref) {
@@ -51,14 +54,37 @@ class AuthState {
 class AuthController extends StateNotifier<AuthState> {
   AuthController(this._ref) : super(const AuthState(initializing: true)) {
     _restore();
-    _ref.listen<int>(authSessionExpiredProvider, (prev, next) {
-      if (prev != null && next > prev) {
-        state = const AuthState();
-      }
+    // Listen after this provider finishes creating — avoids circular dependency
+    // with apiClient / session-expired during AuthController construction.
+    Future.microtask(() {
+      if (!mounted) return;
+      _ref.listen<int>(authSessionExpiredProvider, (prev, next) {
+        if (prev != null && next > prev) {
+          _forceSignedOut();
+        }
+      });
     });
   }
 
   final Ref _ref;
+
+  /// Clear UI focus only — do NOT invalidate profileProvider here.
+  /// profileProvider watches auth userId; invalidating it from AuthController
+  /// causes Riverpod circular dependency on OTP continue / login.
+  void _clearSessionUi() {
+    try {
+      _ref.read(rideHubFocusProvider.notifier).state = null;
+    } catch (_) {}
+  }
+
+  Future<void> _forceSignedOut() async {
+    try {
+      await _ref.read(secureStorageProvider).deleteAll();
+    } catch (_) {}
+    _clearSessionUi();
+    if (!mounted) return;
+    state = const AuthState();
+  }
 
   Future<void> _restore() async {
     try {
@@ -67,6 +93,7 @@ class AuthController extends StateNotifier<AuthState> {
       final userId = await storage.read(key: 'user_id');
       final phone = await storage.read(key: 'phone');
       final name = await storage.read(key: 'display_name');
+      if (!mounted) return;
       if (token != null && token.isNotEmpty) {
         state = AuthState(
           token: token,
@@ -78,7 +105,7 @@ class AuthController extends StateNotifier<AuthState> {
         state = const AuthState();
       }
     } catch (_) {
-      state = const AuthState();
+      if (mounted) state = const AuthState();
     }
   }
 
@@ -91,41 +118,45 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> verifyOtp(String phone, String code, {String? displayName}) async {
-    state = state.copyWith(loading: true);
-    try {
-      final api = _ref.read(apiClientProvider);
-      final res = await api.dio.post('/auth/otp/verify', data: {
-        'phone': phone,
-        'code': code,
-        if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
-      });
-      final data = res.data as Map<String, dynamic>;
-      final storage = _ref.read(secureStorageProvider);
-      await storage.write(key: 'access_token', value: data['accessToken'] as String);
-      await storage.write(key: 'refresh_token', value: data['refreshToken'] as String);
-      await storage.write(key: 'user_id', value: data['userId'] as String);
-      await storage.write(key: 'phone', value: data['phone'] as String);
-      await storage.write(key: 'display_name', value: data['displayName'] as String? ?? '');
-      state = AuthState(
-        token: data['accessToken'] as String,
-        userId: data['userId'] as String,
-        phone: data['phone'] as String,
-        displayName: data['displayName'] as String?,
-      );
-    } finally {
-      state = state.copyWith(loading: false);
-    }
+    final api = _ref.read(apiClientProvider);
+    final res = await api.dio.post('/auth/otp/verify', data: {
+      'phone': phone,
+      'code': code,
+      if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
+    });
+    final data = res.data as Map<String, dynamic>;
+    final storage = _ref.read(secureStorageProvider);
+
+    await storage.write(key: 'access_token', value: data['accessToken'] as String);
+    await storage.write(key: 'refresh_token', value: data['refreshToken'] as String);
+    await storage.write(key: 'user_id', value: data['userId'] as String);
+    await storage.write(key: 'phone', value: data['phone'] as String);
+    await storage.write(key: 'display_name', value: data['displayName'] as String? ?? '');
+
+    _clearSessionUi();
+    if (!mounted) return;
+    // userId change refreshes profile/vehicles/trips (they watch auth userId).
+    state = AuthState(
+      token: data['accessToken'] as String,
+      userId: data['userId'] as String,
+      phone: data['phone'] as String,
+      displayName: data['displayName'] as String?,
+    );
   }
 
   Future<void> logout() async {
     await _ref.read(secureStorageProvider).deleteAll();
+    _clearSessionUi();
+    if (!mounted) return;
     state = const AuthState();
   }
 }
 
 final profileProvider = FutureProvider.autoDispose<Profile>((ref) async {
-  final auth = ref.watch(authStateProvider);
-  if (!auth.isAuthenticated) throw Exception('Not signed in');
+  final userId = ref.watch(authStateProvider.select((s) => s.userId));
+  if (userId == null || userId.isEmpty) {
+    throw Exception('Not signed in');
+  }
   final api = ref.read(apiClientProvider);
   final res = await api.dio.get('/profile/me');
   return Profile.fromJson(res.data as Map<String, dynamic>);

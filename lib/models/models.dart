@@ -186,8 +186,11 @@ class Ride {
     this.destinationFullAddress,
     this.destinationPrivateLabel,
     required this.departAt,
+    this.expiresAt,
     required this.availableSeats,
     required this.pricePerSeat,
+    this.recurring = false,
+    this.scheduleId,
     this.commuteMatchType,
     this.detourKm,
     this.routeGeometry,
@@ -212,8 +215,11 @@ class Ride {
   final String? destinationFullAddress;
   final String? destinationPrivateLabel;
   final DateTime departAt;
+  final DateTime? expiresAt;
   final int availableSeats;
   final double pricePerSeat;
+  final bool recurring;
+  final String? scheduleId;
   final String? commuteMatchType;
   final double? detourKm;
   final List<List<double>>? routeGeometry;
@@ -272,8 +278,11 @@ class Ride {
       destinationFullAddress: j['destinationFullAddress'] as String?,
       destinationPrivateLabel: j['destinationPrivateLabel'] as String?,
       departAt: DateTime.parse(j['departAt'] as String).toLocal(),
+      expiresAt: j['expiresAt'] != null ? DateTime.parse(j['expiresAt'] as String).toLocal() : null,
       availableSeats: j['availableSeats'] as int,
       pricePerSeat: (j['pricePerSeat'] as num).toDouble(),
+      recurring: j['recurring'] as bool? ?? false,
+      scheduleId: j['scheduleId'] as String?,
       commuteMatchType: j['commuteMatchType'] as String?,
       detourKm: (j['detourKm'] as num?)?.toDouble(),
       routeGeometry: geometry,
@@ -343,9 +352,12 @@ class RideRequest {
     this.destinationFullAddress,
     this.destinationPrivateLabel,
     required this.departAt,
+    this.expiresAt,
     required this.seatsNeeded,
     required this.comfortPreferred,
     required this.status,
+    this.recurring = false,
+    this.scheduleId,
     this.matchedRideId,
     this.matchedBookingId,
     this.poster,
@@ -364,9 +376,12 @@ class RideRequest {
   final String? destinationFullAddress;
   final String? destinationPrivateLabel;
   final DateTime departAt;
+  final DateTime? expiresAt;
   final int seatsNeeded;
   final bool comfortPreferred;
   final String status;
+  final bool recurring;
+  final String? scheduleId;
   final String? matchedRideId;
   final String? matchedBookingId;
   final PosterCard? poster;
@@ -399,9 +414,12 @@ class RideRequest {
         destinationFullAddress: j['destinationFullAddress'] as String?,
         destinationPrivateLabel: j['destinationPrivateLabel'] as String?,
         departAt: DateTime.parse(j['departAt'] as String).toLocal(),
+        expiresAt: j['expiresAt'] != null ? DateTime.parse(j['expiresAt'] as String).toLocal() : null,
         seatsNeeded: j['seatsNeeded'] as int? ?? 1,
         comfortPreferred: j['comfortPreferred'] as bool? ?? false,
         status: j['status'] as String,
+        recurring: j['recurring'] as bool? ?? false,
+        scheduleId: j['scheduleId'] as String?,
         matchedRideId: j['matchedRideId'] as String?,
         matchedBookingId: j['matchedBookingId'] as String?,
         poster: j['poster'] is Map<String, dynamic>
@@ -495,3 +513,151 @@ class NeedInboxItem {
         alreadyOffered: j['alreadyOffered'] as bool? ?? false,
       );
 }
+
+class RideSchedule {
+  RideSchedule({
+    required this.id,
+    required this.kind,
+    required this.frequency,
+    required this.daysOfWeek,
+    this.dayOfMonth,
+    required this.departLocalTime,
+    required this.timezone,
+    required this.active,
+    this.vehicleId,
+    required this.originLabel,
+    required this.destinationLabel,
+  });
+
+  final String id;
+  final String kind;
+  final String frequency;
+  final List<int> daysOfWeek;
+  final int? dayOfMonth;
+  final String departLocalTime;
+  final String timezone;
+  final bool active;
+  final String? vehicleId;
+  final String originLabel;
+  final String destinationLabel;
+
+  String get frequencyLabel {
+    switch (frequency) {
+      case 'daily':
+        return 'Daily';
+      case 'weekdays':
+        return 'Weekdays';
+      case 'weekends':
+        return 'Weekends';
+      case 'weekly':
+        return 'Weekly';
+      case 'monthly':
+        return 'Monthly';
+      case 'custom_days':
+        return 'Specific days';
+      default:
+        return frequency;
+    }
+  }
+
+  factory RideSchedule.fromJson(Map<String, dynamic> j) {
+    final days = (j['daysOfWeek'] as List?)?.map((e) => (e as num).toInt()).toList() ?? const <int>[];
+    final time = j['departLocalTime'];
+    final timeStr = time is String ? time : time?.toString() ?? '';
+    return RideSchedule(
+      id: j['id'] as String,
+      kind: j['kind'] as String,
+      frequency: j['frequency'] as String,
+      daysOfWeek: days,
+      dayOfMonth: j['dayOfMonth'] as int?,
+      departLocalTime: timeStr.length >= 5 ? timeStr.substring(0, 5) : timeStr,
+      timezone: j['timezone'] as String? ?? 'Asia/Kolkata',
+      active: j['active'] as bool? ?? true,
+      vehicleId: j['vehicleId'] as String?,
+      originLabel: j['originLabel'] as String? ?? 'Origin',
+      destinationLabel: j['destinationLabel'] as String? ?? 'Destination',
+    );
+  }
+}
+
+class ChatConversation {
+  ChatConversation({
+    required this.id,
+    required this.rideId,
+    required this.hostId,
+    required this.coRiderId,
+    required this.myRole,
+    required this.peer,
+    required this.unreadCount,
+    required this.canSend,
+    this.bookingId,
+    this.offerId,
+    this.rideOriginLabel,
+    this.rideDestinationLabel,
+    this.departAt,
+    this.lastMessagePreview,
+    this.lastMessageAt,
+  });
+
+  final String id;
+  final String rideId;
+  final String hostId;
+  final String coRiderId;
+  final String? bookingId;
+  final String? offerId;
+  final String? rideOriginLabel;
+  final String? rideDestinationLabel;
+  final DateTime? departAt;
+  final String myRole;
+  final PosterCard peer;
+  final String? lastMessagePreview;
+  final DateTime? lastMessageAt;
+  final int unreadCount;
+  final bool canSend;
+
+  bool get iAmHost => myRole == 'host';
+
+  factory ChatConversation.fromJson(Map<String, dynamic> j) => ChatConversation(
+        id: j['id'] as String,
+        rideId: j['rideId'] as String,
+        hostId: j['hostId'] as String,
+        coRiderId: j['coRiderId'] as String,
+        bookingId: j['bookingId'] as String?,
+        offerId: j['offerId'] as String?,
+        rideOriginLabel: j['rideOriginLabel'] as String?,
+        rideDestinationLabel: j['rideDestinationLabel'] as String?,
+        departAt: j['departAt'] != null ? DateTime.parse(j['departAt'] as String).toLocal() : null,
+        myRole: j['myRole'] as String? ?? 'co_rider',
+        peer: PosterCard.fromJson(j['peer'] as Map<String, dynamic>?),
+        lastMessagePreview: j['lastMessagePreview'] as String?,
+        lastMessageAt:
+            j['lastMessageAt'] != null ? DateTime.parse(j['lastMessageAt'] as String).toLocal() : null,
+        unreadCount: (j['unreadCount'] as num?)?.toInt() ?? 0,
+        canSend: j['canSend'] as bool? ?? true,
+      );
+}
+
+class ChatMessage {
+  ChatMessage({
+    required this.id,
+    required this.conversationId,
+    required this.senderId,
+    required this.body,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String conversationId;
+  final String senderId;
+  final String body;
+  final DateTime createdAt;
+
+  factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
+        id: j['id'] as String,
+        conversationId: j['conversationId'] as String,
+        senderId: j['senderId'] as String,
+        body: j['body'] as String? ?? '',
+        createdAt: DateTime.parse(j['createdAt'] as String).toLocal(),
+      );
+}
+

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/location_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
 import 'package:ridebuddy/screens/vehicle/vehicles_screen.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/location_service.dart';
@@ -17,6 +18,8 @@ import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/osm_map_view.dart';
 import 'package:ridebuddy/widgets/maps/place_search_field.dart';
+import 'package:ridebuddy/widgets/maps/route_alternatives_bar.dart';
+import 'package:ridebuddy/widgets/ride/recurrence_picker.dart';
 
 class PostRideScreen extends ConsumerStatefulWidget {
   const PostRideScreen({super.key});
@@ -43,6 +46,11 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   String? _error;
   bool _priceManual = false;
   SeatPriceEstimate? _priceEstimate;
+  bool _recurring = false;
+  RecurrenceFrequency _frequency = RecurrenceFrequency.weekdays;
+  Set<int> _days = {1, 2, 3, 4, 5};
+  int _dayOfMonth = DateTime.now().day;
+  TimeOfDay _departTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1)));
 
   List<DriveRoute> _routes = [];
   int _selectedRoute = 0;
@@ -281,11 +289,12 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   }
 
   Future<void> _pickDepart() async {
+    final now = DateTime.now();
     final date = await showDatePicker(
       context: context,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
-      initialDate: _depart,
+      firstDate: now,
+      lastDate: now.add(const Duration(hours: 24)),
+      initialDate: _depart.isBefore(now) ? now : _depart,
     );
     if (date == null) return;
     if (!mounted) return;
@@ -293,8 +302,15 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
     if (time == null) return;
     setState(() {
       _depart = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _departTime = time;
     });
     _recalculatePrice();
+  }
+
+  Future<void> _pickRecurringTime() async {
+    final time = await showTimePicker(context: context, initialTime: _departTime);
+    if (time == null || !mounted) return;
+    setState(() => _departTime = time);
   }
 
   Future<void> _publish() async {
@@ -326,7 +342,13 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
       setState(() => _error = 'Price per seat should be at least ₹${SeatPriceEstimator.minPerSeat}');
       return;
     }
-    if (_routes.isEmpty) {
+    if (_recurring &&
+        (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays) &&
+        _days.isEmpty) {
+      setState(() => _error = 'Pick at least one day for the schedule');
+      return;
+    }
+    if (!_recurring && _routes.isEmpty) {
       await _loadRoutes();
     }
     setState(() {
@@ -334,11 +356,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
       _error = null;
     });
     try {
-      final selected = _routes.isNotEmpty && _selectedRoute < _routes.length ? _routes[_selectedRoute] : null;
-      final ride = await ref.read(rideRepositoryProvider).createRide({
-        'vehicleId': _vehicle!.id,
-        'rideType': 'scheduled',
-        'comfortRide': _comfort,
+      final places = {
         'originLat': _from!.lat,
         'originLng': _from!.lng,
         'originLabel': _from!.publicShort,
@@ -351,15 +369,47 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
         'destinationPublicShort': _to!.publicShort,
         'destinationFullAddress': _to!.fullAddress,
         'destinationPrivateLabel': _to!.privateLabel,
-        'departAt': _depart.toUtc().toIso8601String(),
-        'availableSeats': seats,
-        'pricePerSeat': double.tryParse(_price.text) ?? 0,
-        'recurring': false,
-        if (selected != null) 'routeGeometry': selected.toJsonCoords(),
-        if (selected != null) 'routeDistanceM': selected.distanceMeters,
-        if (selected != null) 'routeDurationS': selected.durationSeconds,
-      });
-      if (mounted) context.push('/ride/detail/${ride.id}');
+      };
+      if (_recurring) {
+        await ref.read(rideRepositoryProvider).createSchedule({
+          'kind': 'ride',
+          'frequency': _frequency.apiValue,
+          if (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays)
+            'daysOfWeek': _days.toList()..sort(),
+          if (_frequency == RecurrenceFrequency.monthly) 'dayOfMonth': _dayOfMonth,
+          'departLocalTime':
+              '${_departTime.hour.toString().padLeft(2, '0')}:${_departTime.minute.toString().padLeft(2, '0')}:00',
+          'timezone': 'Asia/Kolkata',
+          'vehicleId': _vehicle!.id,
+          'availableSeats': seats,
+          'pricePerSeat': price,
+          'comfortRide': _comfort,
+          ...places,
+        });
+        if (mounted) {
+          bumpRideData(ref);
+          context.go('/ride/schedules');
+        }
+      } else {
+        final selected = _routes.isNotEmpty && _selectedRoute < _routes.length ? _routes[_selectedRoute] : null;
+        final ride = await ref.read(rideRepositoryProvider).createRide({
+          'vehicleId': _vehicle!.id,
+          'rideType': 'scheduled',
+          'comfortRide': _comfort,
+          ...places,
+          'departAt': _depart.toUtc().toIso8601String(),
+          'availableSeats': seats,
+          'pricePerSeat': price,
+          'recurring': false,
+          if (selected != null) 'routeGeometry': selected.toJsonCoords(),
+          if (selected != null) 'routeDistanceM': selected.distanceMeters,
+          if (selected != null) 'routeDurationS': selected.durationSeconds,
+        });
+        if (mounted) {
+          bumpRideData(ref);
+          context.go('/ride/co-riders/${ride.id}');
+        }
+      }
     } catch (e) {
       setState(() => _error = ref.read(apiClientProvider).messageFrom(e));
     } finally {
@@ -506,7 +556,9 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
           step: _step,
           stepCount: _stepTitles.length,
           saving: _saving,
-          primaryLabel: _step == 2 ? 'Publish' : 'Continue',
+          primaryLabel: _step == 2
+              ? (_recurring ? 'Save schedule' : 'Publish')
+              : 'Continue',
           primaryEnabled: _step == 0
               ? (_from != null && _to != null && !_routing)
               : _step == 1
@@ -518,10 +570,12 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                   : '₹${priceVal.toStringAsFixed(0)} / seat · ${_seats.text} seats'
                       '${selected != null ? ' · ${selected.durationLabel}' : ''}')
               : _step == 0 && selected != null
-                  ? '${selected.durationLabel} · ${selected.distanceLabel}'
-                  : _step == 1 && _vehicle != null
-                      ? _vehicle!.displayName
-                      : 'Step ${_step + 1} of ${_stepTitles.length}',
+                  ? selected.footerLabel
+                  : _step == 0 && _from != null && _to != null
+                      ? '${_short(_from!.label)} → ${_short(_to!.label)}'
+                      : _step == 1 && _vehicle != null
+                          ? _vehicle!.displayName
+                          : 'Step ${_step + 1} of ${_stepTitles.length}',
           onBack: _step > 0 ? _goBack : null,
           onPrimary: _goNext,
         ),
@@ -566,12 +620,13 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
           child: SoftPanel(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
-                    Text('Places', style: Theme.of(context).textTheme.titleSmall),
+                    Text('Places', style: Theme.of(context).textTheme.labelLarge),
                     const Spacer(),
                     _InfoIcon(
                       title: 'Places',
@@ -581,11 +636,10 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
                 PlaceSearchField(
                   key: _fromKey,
                   label: 'From',
-                  initialText: _from?.label,
+                  initialText: _from?.fieldLabel,
                   searchCity: _userCity,
                   nearLat: _nearLat,
                   nearLng: _nearLng,
@@ -594,7 +648,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                   compact: true,
                 ),
                 SizedBox(
-                  height: 36,
+                  height: 24,
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
@@ -607,8 +661,8 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                           customBorder: const CircleBorder(),
                           onTap: (_from != null || _to != null) ? _swapEnds : null,
                           child: Ink(
-                            width: 36,
-                            height: 36,
+                            width: 24,
+                            height: 24,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(color: AppTheme.line),
@@ -616,7 +670,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                             ),
                             child: Icon(
                               Icons.swap_vert_rounded,
-                              size: 20,
+                              size: 14,
                               color: (_from != null || _to != null)
                                   ? AppTheme.brandBlue
                                   : AppTheme.inkMuted,
@@ -630,7 +684,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                 PlaceSearchField(
                   key: _toKey,
                   label: 'To',
-                  initialText: _to?.label,
+                  initialText: _to?.fieldLabel,
                   searchCity: _userCity,
                   nearLat: _from?.lat ?? _nearLat,
                   nearLng: _from?.lng ?? _nearLng,
@@ -641,31 +695,62 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
             ),
           ),
         ),
-        if (_locating)
+        if (_locating || _routing)
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 6, 16, 0),
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: LinearProgressIndicator(minHeight: 2),
           ),
         if (_error != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: ErrorBanner(_error!),
           ),
         if (_routeError != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-            child: Text(_routeError!, style: TextStyle(color: Colors.orange.shade800, fontSize: 12)),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Text(
+              _routeError!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Colors.orange.shade800, fontSize: 12),
+            ),
           ),
-        const SizedBox(height: 10),
+        if (_routes.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: RouteAlternativesBar(
+              routes: _routes,
+              selectedIndex: _selectedRoute,
+              onSelected: (i) {
+                setState(() => _selectedRoute = i);
+                _recalculatePrice();
+              },
+              onRefresh: _loadRoutes,
+              infoTitle: 'Route',
+              infoMessage: _routes.length > 1
+                  ? 'Live traffic ETAs when available — up to 3 routes, fastest first. Tap a chip to switch. Refresh recalculates with current traffic.'
+                  : (selected?.usesLiveTraffic == true
+                      ? 'Live traffic ETA for this drive. Refresh to recalculate.'
+                      : 'Typical driving ETA (no live traffic key). Refresh after conditions change.'),
+            ),
+          ),
+        const SizedBox(height: 6),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: Stack(
-              children: [
-                OsmMapView(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final h = constraints.maxHeight;
+                if (h < 80) {
+                  return const Center(
+                    child: Text('Map needs a bit more space', textAlign: TextAlign.center),
+                  );
+                }
+                return OsmMapView(
                   center: mapCenter,
-                  expand: true,
+                  height: h,
                   fitToMarkers: true,
+                  fitPadding: const EdgeInsets.all(36),
                   markers: [
                     if (_from != null) OsmMapView.pin(LatLng(_from!.lat, _from!.lng)),
                     if (_to != null)
@@ -677,61 +762,8 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                     setState(() => _selectedRoute = i);
                     _recalculatePrice();
                   },
-                ),
-                if (_routing)
-                  const Positioned(
-                    left: 0,
-                    right: 0,
-                    top: 0,
-                    child: LinearProgressIndicator(minHeight: 2),
-                  ),
-                if (selected != null)
-                  Positioned(
-                    left: 10,
-                    right: 10,
-                    bottom: 10,
-                    child: Material(
-                      elevation: 2,
-                      color: Colors.white.withOpacity(0.96),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-                        child: Row(
-                          children: [
-                            Icon(
-                              selected.usesLiveTraffic ? Icons.traffic_rounded : Icons.route_rounded,
-                              size: 20,
-                              color: AppTheme.brandBlue,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                '${selected.rankLabel} · ${selected.durationLabel} · ${selected.distanceLabel}',
-                                style: Theme.of(context).textTheme.titleSmall,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            _InfoIcon(
-                              title: 'Route',
-                              message: _routes.length > 1
-                                  ? 'Showing top routes by ETA. Tap a chip on the map to switch. Refresh updates traffic when available.'
-                                  : (selected.usesLiveTraffic
-                                      ? 'Live traffic ETA for this drive. Refresh to recalculate.'
-                                      : 'Typical driving ETA. Refresh after traffic changes.'),
-                            ),
-                            IconButton(
-                              tooltip: 'Refresh route',
-                              onPressed: _loadRoutes,
-                              icon: const Icon(Icons.refresh_rounded, size: 20),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+                );
+              },
             ),
           ),
         ),
@@ -886,34 +918,52 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
         ),
       ),
       const SizedBox(height: 12),
+      RecurrencePicker(
+        recurring: _recurring,
+        onRecurringChanged: (v) => setState(() => _recurring = v),
+        frequency: _frequency,
+        onFrequencyChanged: (f) => setState(() => _frequency = f),
+        selectedDays: _days,
+        onDaysChanged: (d) => setState(() => _days = d),
+        dayOfMonth: _dayOfMonth,
+        onDayOfMonthChanged: (d) => setState(() => _dayOfMonth = d),
+        departTime: _departTime,
+        onDepartTimePressed: _pickRecurringTime,
+      ),
+      if (!_recurring) ...[
+        const SizedBox(height: 12),
+        SoftPanel(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+          child: InkWell(
+            onTap: _pickDepart,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, color: AppTheme.brandBlue, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      DateFormat.MMMEd().add_jm().format(_depart.toLocal()),
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  Text(
+                    'Change',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(color: AppTheme.brandBlue),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+      const SizedBox(height: 12),
       SoftPanel(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Column(
           children: [
-            InkWell(
-              onTap: _pickDepart,
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    const Icon(Icons.schedule_rounded, color: AppTheme.brandBlue, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        DateFormat.MMMEd().add_jm().format(_depart.toLocal()),
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                    ),
-                    Text(
-                      'Change',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(color: AppTheme.brandBlue),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(height: 18),
             Row(
               children: [
                 Expanded(
@@ -1133,6 +1183,7 @@ class _WizardBar extends StatelessWidget {
                 OutlinedButton(
                   onPressed: saving ? null : onBack,
                   style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
@@ -1152,7 +1203,7 @@ class _WizardBar extends StatelessWidget {
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodySmall,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],

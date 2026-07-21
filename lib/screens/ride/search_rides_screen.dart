@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:ridebuddy/models/models.dart';
+import 'package:intl/intl.dart';
 import 'package:ridebuddy/providers/location_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/location_service.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
-import 'package:ridebuddy/widgets/common/empty_state.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 import 'package:ridebuddy/widgets/maps/place_search_field.dart';
-import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
+import 'package:ridebuddy/widgets/ride/recurrence_picker.dart';
 
+/// Post a seat request; matching rides open on the request screen (map by default).
 class SearchRidesScreen extends ConsumerStatefulWidget {
   const SearchRidesScreen({super.key});
 
@@ -27,11 +28,15 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
   String? _userCity;
   double? _nearLat;
   double? _nearLng;
-  bool _comfortOnly = false;
-  bool _sameCommute = false;
-  bool _loading = false;
-  bool _searched = false;
-  List<Ride> _results = [];
+  DateTime _depart = DateTime.now().add(const Duration(hours: 1));
+  int _seats = 1;
+  bool _comfort = false;
+  bool _saving = false;
+  bool _recurring = false;
+  RecurrenceFrequency _frequency = RecurrenceFrequency.weekdays;
+  Set<int> _days = {1, 2, 3, 4, 5};
+  int _dayOfMonth = DateTime.now().day;
+  TimeOfDay _departTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1)));
   String? _error;
 
   @override
@@ -50,8 +55,7 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
         _nearLng = region.lng;
         if (region.home != null && region.office != null) {
           final hour = DateTime.now().hour;
-          final am = hour < 15;
-          if (am) {
+          if (hour < 15) {
             _from = region.home;
             _to = region.office;
           } else {
@@ -60,21 +64,11 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
           }
         }
       });
-      _syncFromField();
-      final to = _to;
-      if (to != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          // PlaceSearchField for To has no key — still ok for From bias/map.
-        });
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final from = _from;
+        if (from != null) _fromKey.currentState?.applyPlace(from);
+      });
     } catch (_) {}
-  }
-
-  void _syncFromField() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final from = _from;
-      if (from != null) _fromKey.currentState?.applyPlace(from);
-    });
   }
 
   Future<PlaceSuggestion?> _useMyLocation() async {
@@ -99,10 +93,51 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
     return place;
   }
 
-  Future<void> _search() async {
+  Future<void> _pickWhen() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _depart.isBefore(now) ? now : _depart,
+      firstDate: now,
+      lastDate: now.add(const Duration(hours: 24)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_depart),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _depart = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _departTime = time;
+    });
+  }
+
+  Future<void> _pickRecurringTime() async {
+    final time = await showTimePicker(context: context, initialTime: _departTime);
+    if (time == null || !mounted) return;
+    setState(() => _departTime = time);
+  }
+
+  Map<String, dynamic> get _placesBody => {
+        'originLat': _from!.lat,
+        'originLng': _from!.lng,
+        'originLabel': _from!.publicShort,
+        'originPublicShort': _from!.publicShort,
+        'originFullAddress': _from!.fullAddress,
+        'originPrivateLabel': _from!.privateLabel,
+        'destinationLat': _to!.lat,
+        'destinationLng': _to!.lng,
+        'destinationLabel': _to!.publicShort,
+        'destinationPublicShort': _to!.publicShort,
+        'destinationFullAddress': _to!.fullAddress,
+        'destinationPrivateLabel': _to!.privateLabel,
+      };
+
+  Future<void> _submit() async {
     if (_from == null || _to == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick From and To from search suggestions')),
+        const SnackBar(content: Text('Pick From and To from suggestions')),
       );
       return;
     }
@@ -112,100 +147,78 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
       );
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-      _searched = true;
-    });
-    try {
-      final list = await ref.read(rideRepositoryProvider).search(
-            originLat: _from!.lat,
-            originLng: _from!.lng,
-            destinationLat: _to!.lat,
-            destinationLng: _to!.lng,
-            comfortOnly: _comfortOnly,
-            sameCommuteOnly: _sameCommute,
-          );
-      setState(() => _results = list);
-    } catch (e) {
-      setState(() => _error = ref.read(apiClientProvider).messageFrom(e));
-    } finally {
-      setState(() => _loading = false);
+    if (_recurring &&
+        (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays) &&
+        _days.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick at least one day')),
+      );
+      return;
     }
-  }
 
-  String _badge(String? type) {
-    switch (type) {
-      case 'same_route':
-        return 'Same commute';
-      case 'same_destination':
-        return 'Same office';
-      case 'same_origin':
-        return 'Same neighborhood';
-      case 'partial':
-        return 'Partial match';
-      default:
-        return 'Nearby';
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    try {
+      final repo = ref.read(rideRepositoryProvider);
+      if (_recurring) {
+        await repo.createSchedule({
+          'kind': 'need',
+          'frequency': _frequency.apiValue,
+          if (_frequency == RecurrenceFrequency.weekly || _frequency == RecurrenceFrequency.customDays)
+            'daysOfWeek': _days.toList()..sort(),
+          if (_frequency == RecurrenceFrequency.monthly) 'dayOfMonth': _dayOfMonth,
+          'departLocalTime':
+              '${_departTime.hour.toString().padLeft(2, '0')}:${_departTime.minute.toString().padLeft(2, '0')}:00',
+          'timezone': 'Asia/Kolkata',
+          'seatsNeeded': _seats,
+          'comfortPreferred': _comfort,
+          ..._placesBody,
+        });
+        if (!mounted) return;
+        bumpRideData(ref);
+        context.go('/ride/schedules');
+        return;
+      }
+
+      final need = await repo.createNeed({
+        ..._placesBody,
+        'departAt': _depart.toUtc().toIso8601String(),
+        'seatsNeeded': _seats,
+        'comfortPreferred': _comfort,
+      });
+
+      // Hub will refresh so the post appears under My requests when user goes back.
+      bumpRideData(ref);
+      ref.read(rideHubFocusProvider.notifier).state = RideHubFocus(needId: need.id);
+
+      if (!mounted) return;
+      context.pushReplacement('/ride/available/${need.id}');
+    } catch (e) {
+      if (mounted) setState(() => _error = ref.read(apiClientProvider).messageFrom(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return SkyScaffold(
-      appBar: AppBar(title: const Text('Find a ride')),
+      appBar: AppBar(title: const Text('I need a ride')),
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         children: [
-          SoftPanel(
-            onTap: () => context.push('/ride/needs/new'),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppTheme.brandOrange.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.hail_rounded, color: AppTheme.brandOrange),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Need a ride instead?', style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Post your trip — hosts can offer; you can still book matches',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
-              ],
-            ),
+          Text(
+            'Post your trip — then see matching open rides on the map.',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppTheme.inkMuted),
           ),
-          const SizedBox(height: 14),
-          if (_userCity != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.location_city_rounded, size: 18, color: AppTheme.brandBlue.withOpacity(0.8)),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Office city · $_userCity',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(color: AppTheme.brandBlue),
-                  ),
-                ],
-              ),
-            ),
+          const SizedBox(height: 16),
           PlaceSearchField(
             key: _fromKey,
             label: 'From',
-            initialText: _from?.label,
+            initialText: _from?.fieldLabel,
             searchCity: _userCity,
             nearLat: _nearLat,
             nearLng: _nearLng,
@@ -215,80 +228,94 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
           const SizedBox(height: 10),
           PlaceSearchField(
             label: 'To',
-            initialText: _to?.label,
+            initialText: _to?.fieldLabel,
             searchCity: _userCity,
             nearLat: _from?.lat ?? _nearLat,
             nearLng: _from?.lng ?? _nearLng,
             onSelected: (p) => setState(() => _to = p),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          RecurrencePicker(
+            recurring: _recurring,
+            onRecurringChanged: (v) => setState(() => _recurring = v),
+            frequency: _frequency,
+            onFrequencyChanged: (f) => setState(() => _frequency = f),
+            selectedDays: _days,
+            onDaysChanged: (d) => setState(() => _days = d),
+            dayOfMonth: _dayOfMonth,
+            onDayOfMonthChanged: (d) => setState(() => _dayOfMonth = d),
+            departTime: _departTime,
+            onDepartTimePressed: _pickRecurringTime,
+          ),
+          if (!_recurring) ...[
+            const SizedBox(height: 12),
+            SoftPanel(
+              onTap: _pickWhen,
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, color: AppTheme.brandBlue),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('When', style: Theme.of(context).textTheme.labelLarge),
+                        const SizedBox(height: 2),
+                        Text(
+                          DateFormat.MMMd().add_jm().format(_depart),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           SoftPanel(
-            padding: EdgeInsets.zero,
             child: Column(
               children: [
-                SwitchListTile(
-                  title: const Text('Prefer comfort'),
-                  subtitle: const Text('Comfort rides first — compact still shown'),
-                  value: _comfortOnly,
-                  onChanged: (v) => setState(() => _comfortOnly = v),
+                Row(
+                  children: [
+                    const Expanded(child: Text('Seats needed')),
+                    ...[1, 2, 3].map((n) {
+                      final selected = _seats == n;
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: ChoiceChip(
+                          label: Text('$n'),
+                          selected: selected,
+                          onSelected: (_) => setState(() => _seats = n),
+                        ),
+                      );
+                    }),
+                  ],
                 ),
-                const Divider(height: 1),
+                const Divider(height: 20),
                 SwitchListTile(
-                  title: const Text('Same commute as me'),
-                  value: _sameCommute,
-                  onChanged: (v) => setState(() => _sameCommute = v),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Prefer comfort (max 2 in back)'),
+                  value: _comfort,
+                  onChanged: (v) => setState(() => _comfort = v),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 14),
-          PrimaryButton(
-            label: _loading ? 'Searching…' : 'Search rides',
-            loading: _loading,
-            icon: Icons.search_rounded,
-            onPressed: _search,
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             ErrorBanner(_error!),
           ],
-          const SizedBox(height: 20),
-          if (_searched && !_loading && _results.isEmpty)
-            SoftPanel(
-              child: EmptyState(
-                title: 'No rides found',
-                subtitle: 'Ask for a seat so hosts can offer you one',
-                icon: Icons.directions_car_outlined,
-                actionLabel: 'Ask for a seat',
-                onAction: () => context.push('/ride/needs/new'),
-              ),
-            ),
-          ..._results.map((r) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: RidePostCard(
-                ride: r,
-                onTap: () => context.push(
-                  '/ride/detail/${r.id}${_comfortOnly ? '?preferComfort=1' : ''}',
-                ),
-                badge: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.brandBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    _badge(r.commuteMatchType),
-                    style: const TextStyle(
-                      color: AppTheme.brandBlue,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
+          const SizedBox(height: 18),
+          PrimaryButton(
+            label: _saving
+                ? (_recurring ? 'Saving…' : 'Finding rides…')
+                : (_recurring ? 'Save schedule' : 'Find rides'),
+            loading: _saving,
+            icon: _recurring ? Icons.event_repeat_rounded : Icons.search_rounded,
+            onPressed: _submit,
+          ),
         ],
       ),
     );

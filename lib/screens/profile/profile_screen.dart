@@ -3,11 +3,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
+import 'package:ridebuddy/providers/chat_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
+import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 import 'package:ridebuddy/widgets/common/error_view.dart';
 import 'package:ridebuddy/widgets/common/loading_skeleton.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
+
+final seatRequestCountProvider = FutureProvider.autoDispose<int>((ref) async {
+  ref.watch(authStateProvider.select((s) => s.userId));
+  try {
+    final inbox = await ref.read(rideRepositoryProvider).needsInbox();
+    return inbox.length;
+  } catch (_) {
+    return 0;
+  }
+});
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -16,6 +28,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(profileProvider);
     final auth = ref.watch(authStateProvider);
+    final seatRequests = ref.watch(seatRequestCountProvider).valueOrNull ?? 0;
 
     return SkyScaffold(
       child: SafeArea(
@@ -60,6 +73,37 @@ class ProfileScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 22),
               const SectionLabel('Ride'),
+              const SizedBox(height: 10),
+              ActionRow(
+                icon: Icons.chat_bubble_outline_rounded,
+                title: 'Messages',
+                subtitle: 'Chat with hosts and co-riders',
+                badgeCount: ref.watch(chatUnreadTotalProvider),
+                onTap: () => context.push('/chat'),
+              ),
+              const SizedBox(height: 10),
+              ActionRow(
+                icon: Icons.confirmation_number_outlined,
+                title: 'My trips',
+                subtitle: 'Bookings as a co-rider',
+                onTap: () => context.push('/ride/trips'),
+              ),
+              const SizedBox(height: 10),
+              ActionRow(
+                icon: Icons.inbox_outlined,
+                title: 'Seat requests',
+                subtitle: 'People asking for a seat on your routes',
+                accent: AppTheme.brandOrange,
+                badgeCount: seatRequests,
+                onTap: () => context.push('/ride/needs'),
+              ),
+              const SizedBox(height: 10),
+              ActionRow(
+                icon: Icons.event_repeat_rounded,
+                title: 'My schedules',
+                subtitle: 'Recurring rides and requests',
+                onTap: () => context.push('/ride/schedules'),
+              ),
               const SizedBox(height: 10),
               ActionRow(
                 icon: Icons.directions_car_outlined,

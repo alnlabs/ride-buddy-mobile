@@ -159,6 +159,7 @@ class ActionRow extends StatelessWidget {
     this.subtitle,
     required this.onTap,
     this.accent = AppTheme.brandBlue,
+    this.badgeCount,
   });
 
   final IconData icon;
@@ -166,9 +167,11 @@ class ActionRow extends StatelessWidget {
   final String? subtitle;
   final VoidCallback onTap;
   final Color accent;
+  final int? badgeCount;
 
   @override
   Widget build(BuildContext context) {
+    final badge = badgeCount ?? 0;
     return Material(
       color: AppTheme.surfaceElevated,
       borderRadius: BorderRadius.circular(16),
@@ -201,6 +204,26 @@ class ActionRow extends StatelessWidget {
                   ],
                 ),
               ),
+              if (badge > 0) ...[
+                Container(
+                  constraints: const BoxConstraints(minWidth: 22),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    badge > 99 ? '99+' : '$badge',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.inkMuted.withOpacity(0.7)),
             ],
           ),
@@ -219,23 +242,24 @@ class SoftPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = Container(
-      width: double.infinity,
-      padding: padding ?? const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceElevated,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.line),
-      ),
-      child: child,
+    // Material (not DecoratedBox) so nested ListTiles can paint ink/splashes.
+    final pad = padding ?? const EdgeInsets.all(16);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: const BorderSide(color: AppTheme.line),
     );
-    if (onTap == null) return content;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: content,
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: AppTheme.surfaceElevated,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        child: onTap == null
+            ? Padding(padding: pad, child: child)
+            : InkWell(
+                onTap: onTap,
+                child: Padding(padding: pad, child: child),
+              ),
       ),
     );
   }

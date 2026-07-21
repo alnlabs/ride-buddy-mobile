@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/models/models.dart';
+import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/providers/location_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/place_label_formatter.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
@@ -28,79 +30,34 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
   late Future<_HubData> _data;
   bool _mapMode = false;
   String? _selectedRideId;
+  String? _loadedForUserId;
 
   @override
   void initState() {
     super.initState();
+    _loadedForUserId = ref.read(authStateProvider).userId;
     _data = _load();
   }
 
   Future<_HubData> _load() async {
     final repo = ref.read(rideRepositoryProvider);
     final open = await repo.openOwned();
-    List<NeedInboxItem> inbox = const [];
     List<RideRequest> needs = const [];
-    try {
-      inbox = await repo.needsInbox();
-    } catch (_) {}
     try {
       needs = await repo.myNeeds();
     } catch (_) {}
-    return _HubData(openRides: open, inbox: inbox, myNeeds: needs);
+    return _HubData(openRides: open, myNeeds: needs);
   }
 
   Future<void> _refresh() async {
+    _loadedForUserId = ref.read(authStateProvider).userId;
     setState(() => _data = _load());
     await _data;
   }
 
-  void _openGetSeatSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: AppTheme.surfaceElevated,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('I need a ride', style: Theme.of(ctx).textTheme.titleLarge),
-              const SizedBox(height: 4),
-              Text(
-                'Find someone already going your way, or post so hosts can offer you a seat.',
-                style: Theme.of(ctx).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              ActionRow(
-                icon: Icons.search_rounded,
-                title: 'Browse open rides',
-                subtitle: 'See seats already posted on your route',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  context.push('/ride/search');
-                },
-              ),
-              const SizedBox(height: 10),
-              ActionRow(
-                icon: Icons.hail_rounded,
-                title: 'Ask for a seat',
-                subtitle: 'Tell hosts where you need to go',
-                accent: AppTheme.brandOrange,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  context.push('/ride/needs/new');
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  Future<void> _openAndRefresh(String location) async {
+    await context.push(location);
+    if (mounted) await _refresh();
   }
 
   String _short(String label, {int max = 28}) => PlaceLabelFormatter.shortenStoredLabel(label);
@@ -108,6 +65,26 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
   @override
   Widget build(BuildContext context) {
     final regionAsync = ref.watch(officeMapRegionProvider);
+
+    ref.listen<String?>(authStateProvider.select((s) => s.userId), (prev, next) {
+      if (prev == next || next == _loadedForUserId) return;
+      setState(() {
+        _loadedForUserId = next;
+        _selectedRideId = null;
+        _mapMode = false;
+        _data = _load();
+      });
+    });
+
+    ref.listen<RideHubFocus?>(rideHubFocusProvider, (prev, next) {
+      if (next == null) return;
+      _refresh();
+    });
+
+    ref.listen<int>(rideDataRevisionProvider, (prev, next) {
+      if (prev == next) return;
+      _refresh();
+    });
 
     return SkyScaffold(
       child: SafeArea(
@@ -119,9 +96,11 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
               final data = snap.data;
               final loading = snap.connectionState != ConnectionState.done;
               final open = data?.openRides ?? const <Ride>[];
-              final inboxCount = data?.inbox.length ?? 0;
+              final now = DateTime.now();
               final myAsks = (data?.myNeeds ?? const <RideRequest>[])
-                  .where((n) => n.status == 'open' || n.status == 'matched')
+                  .where((n) =>
+                      (n.status == 'open' || n.status == 'matched') &&
+                      n.departAt.isAfter(now))
                   .toList();
 
               return CustomScrollView(
@@ -145,10 +124,10 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                               Expanded(
                                 child: _PrimaryTile(
                                   title: 'I need a ride',
-                                  subtitle: 'Find or ask for a seat',
+                                  subtitle: 'Post request · see matches',
                                   icon: Icons.airline_seat_recline_normal_rounded,
                                   color: AppTheme.brandBlue,
-                                  onTap: _openGetSeatSheet,
+                                  onTap: () => _openAndRefresh('/ride/search'),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -158,29 +137,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                                   subtitle: 'Share empty seats',
                                   icon: Icons.directions_car_filled_rounded,
                                   color: AppTheme.brandOrange,
-                                  onTap: () => context.push('/ride/post'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _LinkChip(
-                                  icon: Icons.airline_seat_recline_normal_rounded,
-                                  label: 'As a co-rider',
-                                  onTap: () => context.push('/ride/trips'),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _LinkChip(
-                                  icon: Icons.directions_car_filled_rounded,
-                                  label: inboxCount > 0
-                                      ? 'As a host · $inboxCount'
-                                      : 'As a host',
-                                  onTap: () => context.push('/ride/needs'),
+                                  onTap: () => _openAndRefresh('/ride/post'),
                                 ),
                               ),
                             ],
@@ -226,9 +183,9 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                           child: SoftPanel(
                             child: EmptyState(
                               title: 'No open requests',
-                              subtitle: 'Post where you need to go so hosts can offer you a seat',
-                              actionLabel: 'New request',
-                              onAction: () => context.push('/ride/needs/new'),
+                              subtitle: 'Use “I need a ride” above to post and find matches',
+                              accent: AppTheme.brandBlue,
+                              icon: Icons.hail_rounded,
                             ),
                           ),
                         ),
@@ -248,7 +205,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                                   showPoster: false,
                                   showChevron: true,
                                   statusLabel: n.status,
-                                  onTap: () => context.push('/ride/need/${n.id}'),
+                                  onTap: () => _openAndRefresh('/ride/need/${n.id}'),
                                 ),
                               );
                             },
@@ -267,6 +224,10 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                                     ? "Rides you're offering"
                                     : "Rides you're offering · ${open.length}",
                               ),
+                            ),
+                            TextButton(
+                              onPressed: () => _openAndRefresh('/ride/needs'),
+                              child: const Text('All requests'),
                             ),
                             if (open.isNotEmpty)
                               _ViewToggle(
@@ -287,9 +248,9 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                           child: SoftPanel(
                             child: EmptyState(
                               title: 'No rides offered yet',
-                              subtitle: 'When you host a trip, post empty seats so co-riders can join',
-                              actionLabel: "I'm offering",
-                              onAction: () => context.push('/ride/post'),
+                              subtitle: 'Use “I’m offering” above to post empty seats',
+                              accent: AppTheme.brandOrange,
+                              icon: Icons.directions_car_filled_rounded,
                             ),
                           ),
                         ),
@@ -309,7 +270,15 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                                   ride: r,
                                   isOwner: true,
                                   showChevron: true,
-                                  onTap: () => context.push('/ride/detail/${r.id}'),
+                                  onTap: () => _openAndRefresh('/ride/detail/${r.id}'),
+                                  footer: Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      onPressed: () => _openAndRefresh('/ride/co-riders/${r.id}'),
+                                      icon: const Icon(Icons.hail_rounded, size: 18),
+                                      label: const Text('Find co-riders'),
+                                    ),
+                                  ),
                                 ),
                               );
                             },
@@ -385,6 +354,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
           child: SizedBox(
             height: 420,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
                   child: ClipRRect(
@@ -393,6 +363,7 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                       center: center,
                       expand: true,
                       fitToMarkers: true,
+                      fitPadding: const EdgeInsets.all(28),
                       markers: markers,
                       routes: routes,
                       selectedRouteIndex: 0,
@@ -405,34 +376,44 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
                       final ride = selected!;
                       return Material(
                         color: AppTheme.surfaceElevated,
-                        child: InkWell(
-                          onTap: () => context.push('/ride/detail/${ride.id}'),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '${_short(ride.originLabel, max: 34)} → ${_short(ride.destinationLabel, max: 34)}',
-                                        style: Theme.of(context).textTheme.titleSmall,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              InkWell(
+                                onTap: () => _openAndRefresh('/ride/detail/${ride.id}'),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${_short(ride.originLabel, max: 34)} → ${_short(ride.destinationLabel, max: 34)}',
+                                            style: Theme.of(context).textTheme.titleSmall,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${DateFormat.MMMd().add_jm().format(ride.departAt)} · '
+                                            '${ride.availableSeats} seats',
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${DateFormat.MMMd().add_jm().format(ride.departAt)} · '
-                                        '${ride.availableSeats} seats',
-                                        style: Theme.of(context).textTheme.bodySmall,
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                    FareChip(pricePerSeat: ride.pricePerSeat, compact: true),
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
+                                  ],
                                 ),
-                                FareChip(pricePerSeat: ride.pricePerSeat, compact: true),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.chevron_right_rounded, color: AppTheme.inkMuted),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 10),
+                              FilledButton.tonal(
+                                onPressed: () => _openAndRefresh('/ride/co-riders/${ride.id}'),
+                                child: const Text('Find co-riders'),
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -451,12 +432,10 @@ class _RideHubScreenState extends ConsumerState<RideHubScreen> {
 class _HubData {
   const _HubData({
     required this.openRides,
-    required this.inbox,
     required this.myNeeds,
   });
 
   final List<Ride> openRides;
-  final List<NeedInboxItem> inbox;
   final List<RideRequest> myNeeds;
 }
 
@@ -478,76 +457,43 @@ class _PrimaryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: color,
+      color: AppTheme.surfaceElevated,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.line),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: Colors.white, size: 26),
-              const SizedBox(height: 18),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: 14),
               Text(
                 title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                ),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppTheme.ink,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LinkChip extends StatelessWidget {
-  const _LinkChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.surfaceElevated,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.line),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 16, color: AppTheme.brandBlue),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.inkMuted,
+                    ),
               ),
             ],
           ),

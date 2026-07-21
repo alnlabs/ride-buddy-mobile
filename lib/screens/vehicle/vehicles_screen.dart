@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ridebuddy/models/models.dart';
+import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/services/api_client.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
@@ -11,6 +12,7 @@ import 'package:ridebuddy/widgets/common/loading_skeleton.dart';
 import 'package:ridebuddy/widgets/common/ui_kit.dart';
 
 final vehiclesProvider = FutureProvider.autoDispose<List<Vehicle>>((ref) async {
+  ref.watch(authStateProvider.select((s) => s.userId));
   return ref.read(rideRepositoryProvider).vehicles();
 });
 

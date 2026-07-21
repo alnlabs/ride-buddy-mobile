@@ -3,7 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
+import 'package:ridebuddy/providers/chat_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
+import 'package:ridebuddy/screens/profile/profile_screen.dart';
 import 'package:ridebuddy/services/api_client.dart';
+import 'package:ridebuddy/services/chat_repository.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/widgets/common/comfort_booking.dart';
 import 'package:ridebuddy/widgets/common/empty_state.dart';
@@ -13,9 +17,15 @@ import 'package:ridebuddy/widgets/ride/post_share_sheet.dart';
 import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 
 class NeedDetailScreen extends ConsumerStatefulWidget {
-  const NeedDetailScreen({super.key, required this.requestId});
+  const NeedDetailScreen({
+    super.key,
+    required this.requestId,
+    this.initialMatchesMap = false,
+  });
 
   final String requestId;
+  /// Kept for route compatibility; Find rides opens the available-rides map.
+  final bool initialMatchesMap;
 
   @override
   ConsumerState<NeedDetailScreen> createState() => _NeedDetailScreenState();
@@ -34,14 +44,20 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
   Future<_NeedBundle> _load() async {
     final repo = ref.read(rideRepositoryProvider);
     final need = await repo.getNeed(widget.requestId);
-    final matches = need.status == 'open' ? await repo.needMatches(widget.requestId) : <Ride>[];
     final offers = await repo.needOffers(widget.requestId);
-    return _NeedBundle(need: need, matches: matches, offers: offers);
+    return _NeedBundle(need: need, offers: offers);
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load();
+    });
     await _future;
+  }
+
+  Future<void> _openAndRefresh(String location) async {
+    await context.push(location);
+    if (mounted) await _refresh();
   }
 
   Future<void> _share(RideRequest need) async {
@@ -81,6 +97,8 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
     try {
       await ref.read(rideRepositoryProvider).cancelNeed(need.id);
       if (!mounted) return;
+      bumpRideData(ref);
+      ref.invalidate(seatRequestCountProvider);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request cancelled')));
       context.pop();
     } catch (e) {
@@ -108,45 +126,12 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
     try {
       await ref.read(rideRepositoryProvider).decideOffer(offer.id, accept);
       if (!mounted) return;
+      bumpRideData(ref);
+      ref.invalidate(seatRequestCountProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(accept ? 'Seat accepted — you’re booked' : 'Offer declined')),
       );
       await _refresh();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ref.read(apiClientProvider).messageFrom(e))),
-      );
-    } finally {
-      if (mounted) setState(() => _acting = false);
-    }
-  }
-
-  Future<void> _bookMatch(Ride ride, RideRequest need) async {
-    final proceed = await confirmCompactBookingIfNeeded(
-      context,
-      preferComfort: need.comfortPreferred,
-      rideIsComfort: ride.comfortRide,
-    );
-    if (!proceed || !mounted) return;
-
-    setState(() => _acting = true);
-    try {
-      await ref.read(rideRepositoryProvider).book({
-        'rideId': ride.id,
-        'seatsRequested': need.seatsNeeded,
-        'pickupLat': need.originLat,
-        'pickupLng': need.originLng,
-        'pickupLabel': need.originLabel,
-        'dropLat': need.destinationLat,
-        'dropLng': need.destinationLng,
-        'dropLabel': need.destinationLabel,
-      });
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Booking requested — waiting for host')),
-      );
-      context.push('/ride/detail/${ride.id}${need.comfortPreferred ? '?preferComfort=1' : ''}');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -214,17 +199,24 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
                     footer: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (need.status == 'open')
+                        if (need.status == 'open' && isOwner) ...[
+                          PrimaryButton(
+                            label: 'Find rides',
+                            icon: Icons.map_rounded,
+                            onPressed: () => _openAndRefresh('/ride/available/${need.id}'),
+                          ),
+                          const SizedBox(height: 8),
                           OutlinedButton(
-                            onPressed: _acting || !isOwner ? null : () => _cancel(need),
+                            onPressed: _acting ? null : () => _cancel(need),
                             child: const Text('Cancel request'),
                           ),
+                        ],
                         if (need.matchedRideId != null) ...[
                           const SizedBox(height: 8),
                           PrimaryButton(
                             label: 'Open matched ride',
                             icon: Icons.directions_car_rounded,
-                            onPressed: () => context.push('/ride/detail/${need.matchedRideId}'),
+                            onPressed: () => _openAndRefresh('/ride/detail/${need.matchedRideId}'),
                           ),
                         ],
                       ],
@@ -250,20 +242,53 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
                             padding: const EdgeInsets.only(bottom: 10),
                             child: RidePostCard(
                               ride: ride,
-                              footer: Row(
+                              footer: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: _acting ? null : () => _decideOffer(o, false),
-                                      child: const Text('Decline'),
-                                    ),
+                                  TextButton.icon(
+                                    onPressed: _acting
+                                        ? null
+                                        : () async {
+                                            final nav = GoRouter.of(context);
+                                            final messenger = ScaffoldMessenger.of(context);
+                                            try {
+                                              final conv = await ref
+                                                  .read(chatRepositoryProvider)
+                                                  .open(offerId: o.id);
+                                              ref.invalidate(chatInboxProvider);
+                                              if (!mounted) return;
+                                              nav.push('/chat/${conv.id}');
+                                            } catch (e) {
+                                              if (!mounted) return;
+                                              messenger.showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    ref.read(apiClientProvider).messageFrom(e),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                                    label: const Text('Message host'),
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: FilledButton(
-                                      onPressed: _acting ? null : () => _decideOffer(o, true),
-                                      child: const Text('Accept'),
-                                    ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: _acting ? null : () => _decideOffer(o, false),
+                                          child: const Text('Decline'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: FilledButton(
+                                          onPressed: _acting ? null : () => _decideOffer(o, true),
+                                          child: const Text('Accept'),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -300,36 +325,6 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
                           ),
                         );
                       }),
-                    const SizedBox(height: 22),
-                    const SectionLabel('Matching rides — book yourself'),
-                    const SizedBox(height: 10),
-                    if (bundle.matches.isEmpty)
-                      const SoftPanel(
-                        child: EmptyState(
-                          title: 'No matching rides',
-                          subtitle: 'Try posting earlier or widen your route',
-                          icon: Icons.search_off_rounded,
-                        ),
-                      )
-                    else
-                      ...bundle.matches.map((r) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: RidePostCard(
-                            ride: r,
-                            onTap: () => context.push(
-                              '/ride/detail/${r.id}${need.comfortPreferred ? '?preferComfort=1' : ''}',
-                            ),
-                            footer: Align(
-                              alignment: Alignment.centerRight,
-                              child: FilledButton.tonal(
-                                onPressed: _acting ? null : () => _bookMatch(r, need),
-                                child: const Text('Request seat'),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
                   ],
                 ],
               ),
@@ -342,8 +337,7 @@ class _NeedDetailScreenState extends ConsumerState<NeedDetailScreen> {
 }
 
 class _NeedBundle {
-  _NeedBundle({required this.need, required this.matches, required this.offers});
+  _NeedBundle({required this.need, required this.offers});
   final RideRequest need;
-  final List<Ride> matches;
   final List<RideOffer> offers;
 }

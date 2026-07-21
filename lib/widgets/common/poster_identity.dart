@@ -9,99 +9,146 @@ class PosterIdentity extends StatelessWidget {
     required this.poster,
     this.roleBadge,
     this.dense = false,
+    this.maxInterests = 5,
+    this.showName = true,
   });
 
   final PosterCard poster;
   final String? roleBadge;
   final bool dense;
+  final int maxInterests;
+  /// When false, only role/company + interests (name already shown above).
+  final bool showName;
 
   @override
   Widget build(BuildContext context) {
     final work = poster.workLine;
-    final interests = poster.topInterests.take(5).toList();
+    final interests = poster.topInterests.take(maxInterests).toList();
+    final nameStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w800,
+          height: 1.2,
+        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            CircleAvatar(
-              radius: dense ? 14 : 16,
-              backgroundColor: AppTheme.brandBlue.withOpacity(0.12),
-              child: Text(
-                poster.displayName.isNotEmpty ? poster.displayName[0].toUpperCase() : '?',
-                style: TextStyle(
-                  color: AppTheme.brandBlue,
-                  fontWeight: FontWeight.w800,
-                  fontSize: dense ? 12 : 13,
+        if (showName)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: dense ? 14 : 16,
+                backgroundColor: AppTheme.brandBlue.withValues(alpha: 0.12),
+                child: Text(
+                  poster.displayName.isNotEmpty ? poster.displayName[0].toUpperCase() : '?',
+                  style: TextStyle(
+                    color: AppTheme.brandBlue,
+                    fontWeight: FontWeight.w800,
+                    fontSize: dense ? 12 : 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: poster.displayName, style: nameStyle),
+                          if (poster.employeeVerified)
+                            const WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Icon(Icons.verified_rounded, size: 16, color: AppTheme.brandBlue),
+                              ),
+                            ),
+                          if (roleBadge != null)
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.brandOrange.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    roleBadge!,
+                                    style: const TextStyle(
+                                      color: AppTheme.brandOrange,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (poster.employeeVerified)
+                      Text(
+                        'Verified employee',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppTheme.brandBlue,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    Text(
+                      work ?? 'Role & company not set yet',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppTheme.inkMuted,
+                            fontStyle: work == null ? FontStyle.italic : FontStyle.normal,
+                            fontWeight: FontWeight.w600,
+                          ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
+        else ...[
+          if (roleBadge != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.brandOrange.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    roleBadge!,
+                    style: const TextStyle(
+                      color: AppTheme.brandOrange,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          poster.displayName,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (poster.employeeVerified) ...[
-                        const SizedBox(width: 4),
-                        const Icon(Icons.verified_rounded, size: 16, color: AppTheme.brandBlue),
-                      ],
-                      if (roleBadge != null) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppTheme.brandOrange.withOpacity(0.14),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            roleBadge!,
-                            style: const TextStyle(
-                              color: AppTheme.brandOrange,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (poster.employeeVerified)
-                    Text(
-                      'Verified employee',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppTheme.brandBlue,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  if (work != null)
-                    Text(
-                      work,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  else
-                    Text(
-                      'Role & company not set yet',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppTheme.inkMuted,
-                            fontStyle: FontStyle.italic,
-                          ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          Text(
+            work ?? 'Role & company not set yet',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.inkMuted,
+                  fontStyle: work == null ? FontStyle.italic : FontStyle.normal,
+                  fontWeight: FontWeight.w600,
+                ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
         if (interests.isNotEmpty) ...[
           SizedBox(height: dense ? 6 : 8),
           Wrap(
@@ -112,7 +159,7 @@ class PosterIdentity extends StatelessWidget {
                   (t) => Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppTheme.brandBlue.withOpacity(0.08),
+                      color: AppTheme.brandBlue.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(

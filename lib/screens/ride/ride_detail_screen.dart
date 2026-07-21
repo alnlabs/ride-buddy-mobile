@@ -6,7 +6,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/models/models.dart';
 import 'package:ridebuddy/models/trip_guidelines.dart';
 import 'package:ridebuddy/providers/auth_provider.dart';
+import 'package:ridebuddy/providers/ride_hub_focus_provider.dart';
+import 'package:ridebuddy/screens/booking/my_trips_screen.dart';
 import 'package:ridebuddy/services/api_client.dart';
+import 'package:ridebuddy/services/chat_repository.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
 import 'package:ridebuddy/services/routing_service.dart';
@@ -20,6 +23,7 @@ import 'package:ridebuddy/widgets/maps/place_search_field.dart';
 import 'package:ridebuddy/widgets/ride/post_share_sheet.dart';
 import 'package:ridebuddy/widgets/ride/ride_post_card.dart';
 import 'package:ridebuddy/widgets/trip/trip_guidelines_sheet.dart';
+import 'package:ridebuddy/providers/chat_provider.dart';
 
 class RideDetailScreen extends ConsumerStatefulWidget {
   const RideDetailScreen({
@@ -207,14 +211,19 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                     onSelected: (p) => setModal(() => drop = p),
                   ),
                   const SizedBox(height: 8),
-                  OsmMapView(
-                    height: 160,
-                    center: LatLng(pickup!.lat, pickup!.lng),
-                    markers: [
-                      OsmMapView.pin(LatLng(pickup!.lat, pickup!.lng)),
-                      OsmMapView.pin(LatLng(drop!.lat, drop!.lng), color: AppTheme.brandOrange),
-                    ],
-                    routes: ridePath != null ? [ridePath] : const [],
+                  SizedBox(
+                    width: double.infinity,
+                    child: OsmMapView(
+                      height: 160,
+                      center: LatLng(pickup!.lat, pickup!.lng),
+                      fitToMarkers: true,
+                      fitPadding: const EdgeInsets.all(20),
+                      markers: [
+                        OsmMapView.pin(LatLng(pickup!.lat, pickup!.lng)),
+                        OsmMapView.pin(LatLng(drop!.lat, drop!.lng), color: AppTheme.brandOrange),
+                      ],
+                      routes: ridePath != null ? [ridePath] : const [],
+                    ),
                   ),
                   const SizedBox(height: 12),
                   ElevatedButton(
@@ -240,6 +249,8 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       'dropLabel': drop!.label,
     });
     if (mounted) {
+      bumpRideData(ref);
+      ref.invalidate(myTripsProvider);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Booking requested')));
       context.push('/ride/trips');
     }
@@ -307,6 +318,7 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
           SoftPanel(
             padding: EdgeInsets.zero,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 ClipRRect(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
@@ -314,6 +326,7 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                     center: origin,
                     height: 240,
                     fitToMarkers: true,
+                    fitPadding: const EdgeInsets.all(28),
                     markers: [
                       OsmMapView.pin(origin),
                       OsmMapView.pin(dest, color: AppTheme.brandOrange),
@@ -348,10 +361,22 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
               onPressed: r.status == 'open' && (_myBooking == null) ? _book : null,
             ),
           if (isHost) ...[
+            if (r.status == 'open') ...[
+              FilledButton.icon(
+                onPressed: () async {
+                  await context.push('/ride/co-riders/${r.id}');
+                  if (mounted) _load();
+                },
+                icon: const Icon(Icons.hail_rounded),
+                label: const Text('Find co-riders'),
+              ),
+              const SizedBox(height: 10),
+            ],
             OutlinedButton(
               onPressed: () async {
                 final nav = Navigator.of(context);
                 await ref.read(rideRepositoryProvider).cancelRide(r.id);
+                bumpRideData(ref);
                 nav.pop();
               },
               child: const Text('Cancel ride'),
@@ -376,27 +401,55 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                           contentPadding: EdgeInsets.zero,
                           title: Text('${b.status} · ${b.seatsRequested} seat(s)'),
                           subtitle: Text('${b.pickupLabel} → ${b.dropLabel}'),
-                          trailing: b.status == 'requested'
-                              ? Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.check, color: Colors.green),
-                                      onPressed: () async {
-                                        await ref.read(rideRepositoryProvider).decideBooking(b.id, true);
-                                        _load();
-                                      },
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.close, color: Colors.red),
-                                      onPressed: () async {
-                                        await ref.read(rideRepositoryProvider).decideBooking(b.id, false);
-                                        _load();
-                                      },
-                                    ),
-                                  ],
-                                )
-                              : null,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (b.status == 'requested' || b.status == 'accepted')
+                                IconButton(
+                                  tooltip: 'Message co-rider',
+                                  icon: const Icon(Icons.chat_bubble_outline_rounded),
+                                  onPressed: () async {
+                                    final nav = GoRouter.of(context);
+                                    final messenger = ScaffoldMessenger.of(context);
+                                    try {
+                                      final conv = await ref
+                                          .read(chatRepositoryProvider)
+                                          .open(bookingId: b.id);
+                                      ref.invalidate(chatInboxProvider);
+                                      if (!mounted) return;
+                                      nav.push('/chat/${conv.id}');
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(ref.read(apiClientProvider).messageFrom(e)),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                              if (b.status == 'requested') ...[
+                                IconButton(
+                                  icon: const Icon(Icons.check, color: Colors.green),
+                                  onPressed: () async {
+                                    await ref.read(rideRepositoryProvider).decideBooking(b.id, true);
+                                    bumpRideData(ref);
+                                    ref.invalidate(myTripsProvider);
+                                    _load();
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.red),
+                                  onPressed: () async {
+                                    await ref.read(rideRepositoryProvider).decideBooking(b.id, false);
+                                    bumpRideData(ref);
+                                    ref.invalidate(myTripsProvider);
+                                    _load();
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
                     );

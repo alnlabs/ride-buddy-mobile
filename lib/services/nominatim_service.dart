@@ -43,6 +43,17 @@ class PlaceSuggestion {
   String get label =>
       (privateLabel != null && privateLabel!.trim().isNotEmpty) ? privateLabel!.trim() : publicShort;
 
+  /// Text shown in From/To inputs — prefer area name over private "Home"/"Office".
+  String get fieldLabel {
+    if (kind == 'home' || kind == 'office') {
+      final pub = publicShort.trim();
+      if (pub.isNotEmpty && pub.toLowerCase() != 'home' && pub.toLowerCase() != 'office') {
+        return pub;
+      }
+    }
+    return label;
+  }
+
   String displayTitle({required bool isOwner}) {
     if (isOwner && privateLabel != null && privateLabel!.trim().isNotEmpty) {
       return privateLabel!.trim();
@@ -103,11 +114,19 @@ class NominatimService {
       headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       validateStatus: (code) => code != null && code >= 200 && code < 500,
     ));
+    _googleMaps = Dio(BaseOptions(
+      baseUrl: 'https://maps.googleapis.com',
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 12),
+      headers: {'Accept': 'application/json'},
+      validateStatus: (code) => code != null && code >= 200 && code < 500,
+    ));
   }
 
   late final Dio _nominatim;
   late final Dio _photon;
   late final Dio _google;
+  late final Dio _googleMaps;
 
   String? get _googleKey {
     final k = dotenv.env['GOOGLE_MAPS_API_KEY']?.trim();
@@ -146,6 +165,7 @@ class NominatimService {
           query: q,
         );
       }
+      // Google key present but empty/failed → still try OSM so UX isn't blank.
     }
 
     final tasks = <Future<List<PlaceSuggestion>>>[
@@ -222,29 +242,61 @@ class NominatimService {
           'X-Goog-Api-Key': key,
           'X-Goog-FieldMask':
               'suggestions.placePrediction.place,suggestions.placePrediction.placeId,'
-              'suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
+              'suggestions.placePrediction.text,'
+              'suggestions.placePrediction.structuredFormat',
         }),
       );
       if (auto.statusCode != 200 || auto.data is! Map) return [];
       final suggestions = (auto.data as Map)['suggestions'] as List<dynamic>? ?? [];
-      final placeNames = <String>[];
+
+      final pending = <({String resource, String main, String? secondary})>[];
       for (final s in suggestions) {
         if (s is! Map) continue;
         final pred = s['placePrediction'] as Map<String, dynamic>?;
         if (pred == null) continue;
         final resource = pred['place']?.toString();
         final id = pred['placeId']?.toString();
+        String name;
         if (resource != null && resource.startsWith('places/')) {
-          placeNames.add(resource);
+          name = resource;
         } else if (id != null && id.isNotEmpty) {
-          placeNames.add('places/$id');
+          name = 'places/$id';
+        } else {
+          continue;
         }
-        if (placeNames.length >= 8) break;
+        final structured = pred['structuredFormat'] as Map<String, dynamic>?;
+        String? textOf(dynamic node) {
+          if (node is Map) {
+            final t = node['text']?.toString().trim();
+            if (t != null && t.isNotEmpty) return t;
+          }
+          return null;
+        }
+        final main = textOf(structured?['mainText']);
+        final secondary = textOf(structured?['secondaryText']);
+        final fallbackText = textOf(pred['text']) ?? pred['text']?.toString().trim();
+        pending.add((
+          resource: name,
+          main: (main != null && main.isNotEmpty)
+              ? main
+              : (fallbackText != null && fallbackText.isNotEmpty ? fallbackText : 'Place'),
+          secondary: (secondary != null && secondary.isNotEmpty) ? secondary : null,
+        ));
+        if (pending.length >= 8) break;
       }
-      if (placeNames.isEmpty) return [];
+      if (pending.isEmpty) return [];
 
       final details = await Future.wait(
-        placeNames.map((name) => _googlePlaceDetails(name, key: key, sessionToken: session)),
+        pending.map((p) async {
+          final detailed = await _googlePlaceDetails(
+            p.resource,
+            key: key,
+            sessionToken: session,
+            autocompleteMain: p.main,
+            autocompleteSecondary: p.secondary,
+          );
+          return detailed;
+        }),
       );
       return details.whereType<PlaceSuggestion>().toList();
     } catch (_) {
@@ -256,6 +308,8 @@ class NominatimService {
     String placeResourceName, {
     required String key,
     required String sessionToken,
+    String? autocompleteMain,
+    String? autocompleteSecondary,
   }) async {
     try {
       final path = placeResourceName.startsWith('/') ? placeResourceName : '/v1/$placeResourceName';
@@ -268,7 +322,10 @@ class NominatimService {
               'id,displayName,formattedAddress,location,addressComponents',
         }),
       );
-      if (res.statusCode != 200 || res.data is! Map) return null;
+      if (res.statusCode != 200 || res.data is! Map) {
+        // Still return autocomplete label if details failed (coords missing → skip).
+        return null;
+      }
       final m = res.data as Map<String, dynamic>;
       final loc = m['location'] as Map<String, dynamic>?;
       final lat = (loc?['latitude'] as num?)?.toDouble();
@@ -279,13 +336,28 @@ class NominatimService {
           : m['displayName']?.toString();
       final formatted = m['formattedAddress']?.toString();
       final components = m['addressComponents'] as List<dynamic>?;
+      // Prefer Google autocomplete-style main + secondary (matches Maps UX).
+      final main = (autocompleteMain != null && autocompleteMain.trim().isNotEmpty)
+          ? autocompleteMain.trim()
+          : displayName?.trim();
+      final secondary = autocompleteSecondary?.trim();
+      final publicShort = (main != null && main.isNotEmpty)
+          ? (secondary != null && secondary.isNotEmpty && !main.contains(secondary)
+              ? '$main, ${secondary.split(',').take(2).join(',').trim()}'
+              : PlaceLabelFormatter.fromGoogle(
+                  displayName: main,
+                  formattedAddress: formatted,
+                  addressComponents: components,
+                ))
+          : PlaceLabelFormatter.fromGoogle(
+              displayName: displayName,
+              formattedAddress: formatted,
+              addressComponents: components,
+            );
       return PlaceSuggestion(
-        publicShort: PlaceLabelFormatter.fromGoogle(
-          displayName: displayName,
-          formattedAddress: formatted,
-          addressComponents: components,
-        ),
-        fullAddress: formatted ?? displayName,
+        publicShort: publicShort,
+        fullAddress: formatted ??
+            [main, secondary].whereType<String>().where((e) => e.isNotEmpty).join(', '),
         lat: lat,
         lng: lng,
         city: _cityFromGoogleComponents(components),
@@ -432,6 +504,11 @@ class NominatimService {
   }
 
   Future<PlaceSuggestion?> reverseDetailed(double lat, double lng) async {
+    final googleKey = _googleKey;
+    if (googleKey != null) {
+      final google = await _reverseGoogle(lat, lng, key: googleKey);
+      if (google != null) return google;
+    }
     try {
       final res = await _nominatim.get(
         '/reverse',
@@ -486,6 +563,89 @@ class NominatimService {
       } catch (_) {
         return null;
       }
+    }
+  }
+
+  /// Google Geocoding reverse — same address style as Google Maps pins.
+  Future<PlaceSuggestion?> _reverseGoogle(
+    double lat,
+    double lng, {
+    required String key,
+  }) async {
+    try {
+      Future<Response<dynamic>> call({String? resultType}) {
+        return _googleMaps.get(
+          '/maps/api/geocode/json',
+          queryParameters: {
+            'latlng': '$lat,$lng',
+            'key': key,
+            'language': 'en',
+            if (resultType != null) 'result_type': resultType,
+          },
+        );
+      }
+
+      var res = await call(
+        resultType: 'street_address|route|neighborhood|sublocality|locality|premise',
+      );
+      if (res.statusCode != 200 || res.data is! Map) return null;
+      var data = res.data as Map<String, dynamic>;
+      if (data['status']?.toString() != 'OK') {
+        res = await call();
+        if (res.statusCode != 200 || res.data is! Map) return null;
+        data = res.data as Map<String, dynamic>;
+        if (data['status']?.toString() != 'OK') return null;
+      }
+      final results = data['results'] as List<dynamic>? ?? [];
+      if (results.isEmpty) return null;
+      final first = results.first as Map<String, dynamic>;
+      final formatted = first['formatted_address']?.toString();
+      final components = first['address_components'] as List<dynamic>?;
+      if (formatted == null || formatted.isEmpty) return null;
+
+      String? pick(Set<String> types) {
+        if (components == null) return null;
+        for (final raw in components) {
+          if (raw is! Map) continue;
+          final typeList = (raw['types'] as List<dynamic>? ?? []).map((e) => '$e').toSet();
+          if (typeList.intersection(types).isEmpty) continue;
+          final long = raw['long_name']?.toString().trim();
+          if (long != null && long.isNotEmpty) return long;
+        }
+        return null;
+      }
+
+      final premise = pick({'premise', 'establishment', 'point_of_interest'});
+      final route = pick({'route'});
+      final streetNo = pick({'street_number'});
+      final area = pick({'sublocality_level_1', 'sublocality', 'neighborhood'});
+      final city = pick({'locality'}) ??
+          pick({'administrative_area_level_3'}) ??
+          pick({'administrative_area_level_2'});
+
+      final main = premise ??
+          (streetNo != null && route != null ? '$streetNo $route' : route) ??
+          area ??
+          city ??
+          formatted.split(',').first.trim();
+      final secondaryParts = <String>[
+        if (premise != null && area != null) area,
+        if (premise == null && area != null && area != main) area,
+        if (city != null && city != main && city != area) city,
+      ];
+      final publicShort = secondaryParts.isEmpty
+          ? main
+          : '$main, ${secondaryParts.take(2).join(', ')}';
+
+      return PlaceSuggestion(
+        publicShort: publicShort,
+        fullAddress: formatted,
+        lat: lat,
+        lng: lng,
+        city: city,
+      );
+    } catch (_) {
+      return null;
     }
   }
 

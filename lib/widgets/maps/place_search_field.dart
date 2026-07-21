@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ridebuddy/providers/auth_provider.dart';
 import 'package:ridebuddy/services/location_service.dart';
 import 'package:ridebuddy/services/nominatim_service.dart';
 import 'package:ridebuddy/services/ride_repository.dart';
@@ -109,8 +110,9 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
     super.dispose();
   }
 
-  Future<void> _ensureSavedPicks() async {
-    if (_savedLoaded || !widget.loadSavedPlaces) return;
+  Future<void> _ensureSavedPicks({bool force = false}) async {
+    if (!widget.loadSavedPlaces) return;
+    if (_savedLoaded && !force) return;
     _savedLoaded = true;
     try {
       final places = await ref.read(rideRepositoryProvider).savedPlaces();
@@ -184,7 +186,7 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
   }
 
   void _setFieldText(PlaceSuggestion place, {required bool full}) {
-    final short = place.label;
+    final short = _fieldDisplayLabel(place);
     final fullAddr = place.fullAddress?.trim();
     if (full && fullAddr != null && fullAddr.isNotEmpty) {
       _controller.text = fullAddr;
@@ -193,6 +195,15 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
       _controller.text = short;
       _showFullInField = false;
     }
+  }
+
+  /// From/To field should show the place/area — not the private nickname "Home"/"Office".
+  String _fieldDisplayLabel(PlaceSuggestion place) {
+    if (place.kind == 'home' || place.kind == 'office') {
+      final pub = place.publicShort.trim();
+      if (pub.isNotEmpty) return pub;
+    }
+    return place.label;
   }
 
   void _pick(PlaceSuggestion place) {
@@ -204,6 +215,21 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
     });
     widget.onSelected(place);
     FocusScope.of(context).unfocus();
+  }
+
+  /// Chip text: location name. Kind is already shown via the home/office icon.
+  String _savedChipLabel(PlaceSuggestion p) {
+    final pl = p.privateLabel?.trim();
+    final generic = pl == null ||
+        pl.isEmpty ||
+        pl.toLowerCase() == 'home' ||
+        pl.toLowerCase() == 'office';
+    if (p.kind == 'home' || p.kind == 'office') {
+      if (!generic) return pl;
+      final pub = p.publicShort.trim();
+      if (pub.isNotEmpty) return pub;
+    }
+    return p.label;
   }
 
   void applyPlace(PlaceSuggestion place) {
@@ -342,6 +368,15 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
 
   @override
   Widget build(BuildContext context) {
+    // Reload Home/Office chips when places change (IndexedStack keeps this field alive).
+    ref.listen(profileProvider, (prev, next) {
+      if (!widget.loadSavedPlaces) return;
+      next.whenData((_) {
+        _savedLoaded = false;
+        if (_focused) _ensureSavedPicks(force: true);
+      });
+    });
+
     final hasText = _controller.text.isNotEmpty;
     final theme = Theme.of(context);
     final focused = _focused;
@@ -532,7 +567,7 @@ class PlaceSearchFieldState extends ConsumerState<PlaceSearchField> {
                     size: 16,
                     color: AppTheme.brandBlue,
                   ),
-                  label: Text(p.label),
+                  label: Text(_savedChipLabel(p)),
                   selected: _selected?.savedPlaceId != null && _selected?.savedPlaceId == p.savedPlaceId,
                   onSelected: (_) => _pick(p),
                   visualDensity: VisualDensity.compact,

@@ -4,7 +4,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:ridebuddy/services/routing_service.dart';
 import 'package:ridebuddy/theme/app_theme.dart';
 
-/// Map with markers + selectable driving route alternatives.
+/// Map with markers + driving route polylines.
+///
+/// Always resolves a finite width/height (critical on Flutter web) and fits
+/// markers/routes once the map reports ready.
 class OsmMapView extends StatefulWidget {
   const OsmMapView({
     super.key,
@@ -19,7 +22,9 @@ class OsmMapView extends StatefulWidget {
     this.height = 220,
     this.expand = false,
     this.interactive = true,
-    this.fitToMarkers = false,
+    this.fitToMarkers = true,
+    this.fitPadding = const EdgeInsets.all(28),
+    this.fitMaxZoom = 14,
   });
 
   final LatLng center;
@@ -34,7 +39,10 @@ class OsmMapView extends StatefulWidget {
   /// When true, fills the parent instead of using a fixed [height].
   final bool expand;
   final bool interactive;
+  /// When true (default), camera fits markers / selected route after map ready.
   final bool fitToMarkers;
+  final EdgeInsets fitPadding;
+  final double fitMaxZoom;
 
   @override
   State<OsmMapView> createState() => _OsmMapViewState();
@@ -50,10 +58,14 @@ class OsmMapView extends StatefulWidget {
 }
 
 class _OsmMapViewState extends State<OsmMapView> {
-  final _controller = MapController();
+  late final MapController _controller;
+  bool _mapReady = false;
   bool _tileError = false;
   int _tileLayerKey = 0;
   int _sourceIndex = 0;
+  int _tileFailStreak = 0;
+  int _fitGeneration = 0;
+  Size? _lastLaidOutSize;
 
   static const _sources = [
     (
@@ -66,34 +78,107 @@ class _OsmMapViewState extends State<OsmMapView> {
       fallback: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
       credit: '© OpenStreetMap contributors',
     ),
+    (
+      url: 'https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+      fallback: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+      credit: '© OpenStreetMap · HOT',
+    ),
   ];
 
-  @override
-  void didUpdateWidget(covariant OsmMapView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final shouldFit = widget.fitToMarkers ||
-        widget.routes.isNotEmpty ||
-        (widget.markers.length >= 2);
-    if (shouldFit &&
-        (oldWidget.routes != widget.routes ||
-            oldWidget.selectedRouteIndex != widget.selectedRouteIndex ||
-            oldWidget.markers != widget.markers ||
-            oldWidget.center != widget.center)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitContent());
-    } else if (oldWidget.center != widget.center && widget.routes.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _controller.move(widget.center, widget.zoom);
-      });
-    }
-  }
+  bool get _shouldFit =>
+      widget.fitToMarkers &&
+      (widget.markers.length >= 2 ||
+          widget.routes.isNotEmpty ||
+          widget.polylines.any((p) => p.points.length >= 2));
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fitContent());
+    _controller = MapController();
   }
 
-  void _fitContent() {
+  @override
+  void didUpdateWidget(covariant OsmMapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final contentChanged = oldWidget.routes != widget.routes ||
+        oldWidget.selectedRouteIndex != widget.selectedRouteIndex ||
+        oldWidget.markers != widget.markers ||
+        oldWidget.polylines != widget.polylines ||
+        oldWidget.center != widget.center ||
+        oldWidget.height != widget.height ||
+        oldWidget.expand != widget.expand;
+    if (!contentChanged) return;
+
+    if (_shouldFit) {
+      _scheduleFit();
+    } else if (oldWidget.center != widget.center) {
+      _safeMove(widget.center, widget.zoom);
+    }
+  }
+
+  void _onMapReady() {
+    _mapReady = true;
+    if (_shouldFit) {
+      _scheduleFit();
+    } else {
+      _safeMove(widget.center, widget.zoom);
+    }
+  }
+
+  void _scheduleFit() {
+    final gen = ++_fitGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || gen != _fitGeneration) return;
+      _fitContent(attempt: 0);
+    });
+  }
+
+  void _safeMove(LatLng center, double zoom) {
+    if (!_mapReady || !mounted) return;
+    try {
+      _controller.move(center, zoom);
+    } catch (_) {}
+  }
+
+  EdgeInsets _safePadding(double mapW, double mapH) {
+    final pad = widget.fitPadding;
+    final maxH = (mapH * 0.18).clamp(6.0, 36.0);
+    final maxW = (mapW * 0.18).clamp(6.0, 36.0);
+    return EdgeInsets.only(
+      left: pad.left.clamp(0, maxW),
+      right: pad.right.clamp(0, maxW),
+      top: pad.top.clamp(0, maxH),
+      bottom: pad.bottom.clamp(0, maxH),
+    );
+  }
+
+  void _fitContent({required int attempt}) {
+    if (!mounted || !_mapReady) return;
+
+    double mapW;
+    double mapH;
+    try {
+      final size = _controller.camera.nonRotatedSize;
+      mapW = size.x;
+      mapH = size.y;
+    } catch (_) {
+      if (attempt < 8) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _fitContent(attempt: attempt + 1);
+        });
+      }
+      return;
+    }
+
+    if (mapW <= 2 || mapH <= 2) {
+      if (attempt < 8) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _fitContent(attempt: attempt + 1);
+        });
+      }
+      return;
+    }
+
     final points = <LatLng>[
       ...widget.markers.map((m) => m.point),
       if (widget.routes.isNotEmpty &&
@@ -104,21 +189,54 @@ class _OsmMapViewState extends State<OsmMapView> {
         ...widget.routes.expand((r) => r.points),
       ...widget.polylines.expand((p) => p.points),
     ];
-    if (points.length < 2) {
-      if (points.isNotEmpty) {
-        _controller.move(points.first, widget.zoom);
-      }
+
+    if (points.isEmpty) {
+      _safeMove(widget.center, widget.zoom);
       return;
     }
-    final bounds = LatLngBounds.fromPoints(points);
-    _controller.fitCamera(
-      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
-    );
+    if (points.length == 1) {
+      _safeMove(points.first, widget.zoom);
+      return;
+    }
+
+    try {
+      final bounds = LatLngBounds.fromPoints(points);
+      // Degenerate bounds (same point twice) — just center.
+      if ((bounds.north - bounds.south).abs() < 1e-8 && (bounds.east - bounds.west).abs() < 1e-8) {
+        _safeMove(points.first, widget.zoom);
+        return;
+      }
+      _controller.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: _safePadding(mapW, mapH),
+          maxZoom: widget.fitMaxZoom,
+        ),
+      );
+    } catch (_) {
+      _safeMove(points[points.length ~/ 2], widget.zoom);
+    }
+  }
+
+  void _onTileError() {
+    _tileFailStreak++;
+    if (_tileFailStreak >= 3) {
+      _tileFailStreak = 0;
+      if (!mounted) return;
+      setState(() {
+        _tileError = true;
+        _sourceIndex = (_sourceIndex + 1) % _sources.length;
+        _tileLayerKey++;
+      });
+    } else if (!_tileError && mounted) {
+      setState(() => _tileError = true);
+    }
   }
 
   void _retryTiles() {
     setState(() {
       _tileError = false;
+      _tileFailStreak = 0;
       _sourceIndex = (_sourceIndex + 1) % _sources.length;
       _tileLayerKey++;
     });
@@ -128,11 +246,10 @@ class _OsmMapViewState extends State<OsmMapView> {
     if (widget.routes.isEmpty) return widget.polylines;
     final out = <Polyline>[];
     for (var i = 0; i < widget.routes.length; i++) {
-      final selected = i == widget.selectedRouteIndex;
-      if (selected) continue; // draw selected on top later
+      if (i == widget.selectedRouteIndex) continue;
       out.add(Polyline(
         points: widget.routes[i].points,
-        color: AppTheme.inkMuted.withOpacity(0.45),
+        color: AppTheme.inkMuted.withValues(alpha: 0.45),
         strokeWidth: 4,
       ));
     }
@@ -143,153 +260,132 @@ class _OsmMapViewState extends State<OsmMapView> {
         strokeWidth: 5.5,
       ));
     }
-    return [...widget.polylines, ...out];
+    return [...out, ...widget.polylines];
   }
 
   @override
   Widget build(BuildContext context) {
-    final source = _sources[_sourceIndex];
-    final map = ClipRRect(
-      borderRadius: BorderRadius.circular(widget.expand ? 16 : 12),
-      child: Stack(
-        children: [
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFE8F1FF), Color(0xFFF1F5F9), Color(0xFFE2E8F0)],
-              ),
-            ),
-            child: SizedBox.expand(),
-          ),
-          FlutterMap(
-            mapController: _controller,
-            options: MapOptions(
-              initialCenter: widget.center,
-              initialZoom: widget.zoom,
-              onTap: widget.onTap,
-              backgroundColor: Colors.transparent,
-              interactionOptions: InteractionOptions(
-                flags: widget.interactive ? InteractiveFlag.all : InteractiveFlag.none,
-              ),
-            ),
-            children: [
-              TileLayer(
-                key: ValueKey('tiles-$_tileLayerKey-$_sourceIndex'),
-                urlTemplate: source.url,
-                fallbackUrl: source.fallback,
-                userAgentPackageName: 'com.alnlabs.ridebuddy',
-                tileProvider: NetworkTileProvider(
-                  silenceExceptions: true,
-                  headers: <String, String>{
-                    'User-Agent': 'RideBuddy/1.0 (com.alnlabs.ridebuddy; +https://alnlabs.com)',
-                  },
-                ),
-                maxZoom: 19,
-                errorTileCallback: (tile, error, stackTrace) {
-                  if (!_tileError && mounted) setState(() => _tileError = true);
-                },
-              ),
-              PolylineLayer(polylines: _routePolylines()),
-              if (widget.markers.isNotEmpty) MarkerLayer(markers: widget.markers),
-              RichAttributionWidget(
-                attributions: [
-                  TextSourceAttribution(source.credit),
-                ],
-              ),
-            ],
-          ),
-          if (widget.routes.length > 1)
-            Positioned(
-              left: 8,
-              right: 8,
-              top: 8,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final fallbackH = widget.height;
+        final h = widget.expand
+            ? (constraints.maxHeight.isFinite && constraints.maxHeight > 0
+                ? constraints.maxHeight
+                : fallbackH)
+            : fallbackH;
+        final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+
+        // Never mount FlutterMap at zero size — blank maps on web.
+        if (h < 40 || w < 40) {
+          return SizedBox(
+            width: w.isFinite ? w : double.infinity,
+            height: h < 40 ? fallbackH : h,
+            child: const ColoredBox(color: Color(0xFFE8F1FF)),
+          );
+        }
+
+        final laidOut = Size(w, h);
+        if (_lastLaidOutSize != laidOut) {
+          final prev = _lastLaidOutSize;
+          _lastLaidOutSize = laidOut;
+          // Parent resized (common with Expanded / keyboard / web) — refit.
+          if (prev != null && _mapReady && _shouldFit) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _scheduleFit();
+            });
+          }
+        }
+
+        final source = _sources[_sourceIndex];
+        return SizedBox(
+          width: w,
+          height: h,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(widget.expand ? 16 : 12),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const ColoredBox(color: Color(0xFFE8F1FF)),
+                FlutterMap(
+                  mapController: _controller,
+                  options: MapOptions(
+                    initialCenter: widget.center,
+                    initialZoom: widget.zoom,
+                    onTap: widget.onTap,
+                    onMapReady: _onMapReady,
+                    backgroundColor: const Color(0xFFE8F1FF),
+                    interactionOptions: InteractionOptions(
+                      flags: widget.interactive ? InteractiveFlag.all : InteractiveFlag.none,
+                    ),
+                  ),
                   children: [
-                    for (var i = 0; i < widget.routes.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(
-                            widget.routes[i].chipLabel,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: i == widget.selectedRouteIndex ? Colors.white : AppTheme.ink,
-                            ),
-                          ),
-                          selected: i == widget.selectedRouteIndex,
-                          selectedColor: AppTheme.brandBlue,
-                          backgroundColor: Colors.white.withOpacity(0.92),
-                          onSelected: (_) => widget.onRouteSelected?.call(i),
-                          showCheckmark: false,
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
+                    TileLayer(
+                      key: ValueKey('tiles-$_tileLayerKey-$_sourceIndex'),
+                      urlTemplate: source.url,
+                      fallbackUrl: source.fallback,
+                      userAgentPackageName: 'com.alnlabs.ridebuddy',
+                      tileProvider: NetworkTileProvider(
+                        silenceExceptions: true,
+                        headers: const <String, String>{
+                          'User-Agent': 'RideBuddy/1.0 (com.alnlabs.ridebuddy; +https://alnlabs.com)',
+                        },
                       ),
+                      maxZoom: 19,
+                      errorTileCallback: (tile, error, stackTrace) => _onTileError(),
+                    ),
+                    PolylineLayer(polylines: _routePolylines()),
+                    if (widget.markers.isNotEmpty) MarkerLayer(markers: widget.markers),
+                    RichAttributionWidget(
+                      attributions: [
+                        TextSourceAttribution(source.credit),
+                      ],
+                    ),
                   ],
                 ),
-              ),
-            ),
-          if (widget.routes.length == 1)
-            Positioned(
-              left: 8,
-              top: 8,
-              child: Material(
-                color: Colors.white.withOpacity(0.92),
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Text(
-                    widget.routes.first.chipLabel,
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ),
-          if (_tileError)
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: Material(
-                color: Colors.black.withOpacity(0.82),
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Map tiles unavailable — check mobile data / Wi‑Fi',
-                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                if (_tileError)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.82),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Map tiles unavailable — tap Retry',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _retryTiles,
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w800)),
+                            ),
+                          ],
                         ),
                       ),
-                      TextButton(
-                        onPressed: _retryTiles,
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w800)),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+              ],
             ),
-        ],
-      ),
+          ),
+        );
+      },
     );
-
-    if (widget.expand) {
-      return SizedBox.expand(child: map);
-    }
-    return SizedBox(height: widget.height, child: map);
   }
 }

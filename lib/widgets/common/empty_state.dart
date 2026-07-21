@@ -10,6 +10,7 @@ class EmptyState extends StatelessWidget {
     this.actionLabel,
     this.onAction,
     this.icon = Icons.inbox_outlined,
+    this.accent = AppTheme.brandBlue,
   });
 
   final String title;
@@ -17,6 +18,7 @@ class EmptyState extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
   final IconData icon;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
@@ -30,10 +32,10 @@ class EmptyState extends StatelessWidget {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: AppTheme.skyTop,
+                color: accent.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(icon, size: 28, color: AppTheme.inkMuted),
+              child: Icon(icon, size: 28, color: accent),
             ),
             const SizedBox(height: 14),
             Text(
@@ -51,7 +53,11 @@ class EmptyState extends StatelessWidget {
             ],
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 16),
-              PrimaryButton(label: actionLabel!, onPressed: onAction),
+              PrimaryButton(
+                label: actionLabel!,
+                onPressed: onAction,
+                backgroundColor: accent,
+              ),
             ],
           ],
         ),
