@@ -1,9 +1,9 @@
 # Ride Buddy Mobile
 
-Flutter app (`com.alnlabs.ridebuddy`) — Phase 0–4 base carpool client.
+Expo (React Native) app (`com.alnlabs.ridebuddy`) — Phase 0–4 base carpool client.
 
-**Maps:** OpenStreetMap tiles via [`flutter_map`](https://pub.dev/packages/flutter_map) (Leaflet-style).  
-**Geocoding / place search:** [Nominatim](https://nominatim.openstreetmap.org/) (no Google Maps API key).
+**Maps:** OpenStreetMap / CARTO tiles via `react-native-maps`.  
+**Geocoding / place search:** [Nominatim](https://nominatim.openstreetmap.org/) + Photon (optional Google Places key).
 
 ## Quick start
 
@@ -11,13 +11,15 @@ Flutter app (`com.alnlabs.ridebuddy`) — Phase 0–4 base carpool client.
 # Backend must be running on :8080 (see ../ride-buddy-backend)
 
 cp .env.example .env
-# Android emulator: API_BASE_URL=http://10.0.2.2:8080/api/v1
-# iOS simulator:    API_BASE_URL=http://127.0.0.1:8080/api/v1
-# Physical device:  API_BASE_URL=http://<your-lan-ip>:8080/api/v1
+# iOS simulator / Expo web: EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:8080/api/v1
+# Android emulator:         EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:8080/api/v1
+# Physical device:          EXPO_PUBLIC_API_BASE_URL=http://<your-lan-ip>:8080/api/v1
 
-flutter pub get
-flutter run
+npm install
+npx expo start
 ```
+
+Then press `i` (iOS simulator), `a` (Android emulator), or scan the QR code with Expo Go.
 
 Mock OTP: **123456**
 
@@ -27,23 +29,13 @@ Mock OTP: **123456**
 2. Profile → Home & Office (Nominatim search)  
 3. Profile → My Vehicles → add vehicle (4+ seats for comfort)  
 4. Ride → Offer a ride → publish  
-5. Second account → Find a ride → book (cash) with pickup/drop on OSM map  
+5. Second account → Find a ride → book (cash)  
 6. Owner opens ride detail → accept booking  
 7. Share via WhatsApp / system share sheet  
 
-## Release (Android)
-
-Release keystore: `android/app/upload-keystore.jks` (gitignored)  
-Config: `android/key.properties` (gitignored — copy from `key.properties.example`)
-
-```bash
-flutter build appbundle --release
-# output: build/app/outputs/bundle/release/app-release.aab
-```
-
 ## Navigation
 
-Home · Ride · Jobs (soon) · Meetups (soon) · Profile
+Home · Ride · Discover (jobs / meetups / podcast soon) · Account
 
 ## Branding
 

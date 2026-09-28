@@ -1,7 +1,7 @@
 # Ride Buddy — Mobile Plan
 
 **Project:** `ride-buddy-mobile`  
-**Stack:** Flutter  
+**Stack:** Expo (React Native)  
 **Package ID:** `com.alnlabs.ridebuddy`  
 **Status:** Phase 0–4 base implemented (auth, profile, vehicles, rides, booking, OSM maps)
 
@@ -9,21 +9,21 @@
 
 ## Overview
 
-Flutter app for **Ride Buddy** — employee carpool, job referrals, and meetups (India).
+Expo app for **Ride Buddy** — employee carpool, job referrals, and meetups (India).
 
 | Layer | Choice |
 |-------|--------|
-| Framework | Flutter (latest stable) |
-| State | Riverpod |
-| Routing | go_router |
-| HTTP | dio |
-| Realtime | web_socket_channel / STOMP client |
-| Maps | flutter_map + OpenStreetMap tiles (Leaflet-style) |
+| Framework | Expo (React Native) + Expo Router |
+| State | TanStack Query + React context |
+| Routing | Expo Router |
+| HTTP | axios |
+| Realtime | @stomp/stompjs |
+| Maps | react-native-maps + CARTO / OSM tiles |
 | Places | Nominatim geocoding (no Google Maps key) |
 | Payments | Cash only in base; razorpay later |
-| Push | firebase_messaging (later phase) |
-| Config | flutter_dotenv |
-| Errors | sentry_flutter (Phase 10) |
+| Push | expo-notifications (later phase) |
+| Config | Expo `EXPO_PUBLIC_*` env |
+| Errors | Sentry (Phase 10) |
 
 **Backend:** [`../ride-buddy-backend`](../ride-buddy-backend) — Spring Boot REST + WebSocket
 
@@ -53,7 +53,7 @@ Core product pillars under one brand:
 |------|------|
 | **Name** | Ride Buddy |
 | **Logo** | Icon only — transparent PNG; blue car `#2563EB` + orange buddies/skyline `#F97316` |
-| **Wordmark** | Flutter text: **Ride** (blue) + **Buddy** (orange) |
+| **Wordmark** | Text: **Ride** (blue) + **Buddy** (orange) |
 | **Tagline** | "Carpool · Jobs · Meetups" |
 
 ```dart
@@ -79,7 +79,7 @@ Carpool · Jobs · Meetups
 
 ```mermaid
 flowchart TB
-  subgraph app [Flutter]
+  subgraph app [Expo]
     UI[Screens]
     RP[Riverpod]
     SVC[ApiService / WsService]
@@ -182,11 +182,11 @@ ride-buddy-mobile/
 
 | Phase | Mobile scope |
 |-------|----------------|
-| **0** | Flutter scaffold, deps, theme (brand colors), logo assets, `.env.example`, common widgets |
+| **0** | Expo scaffold, deps, theme (brand colors), logo assets, `.env.example`, common widgets |
 | **1** | Auth screens, onboarding, profile/places/interests, strength UI, offer/need toggle |
 | **2** | My Vehicles, post ride (vehicle picker), comfort toggle, owner dashboard |
 | **3** | Search, booking, My Trips, WhatsApp share |
-| **4** | flutter_map + OSM tiles, Nominatim autocomplete, route/detail map, pickup/drop picker |
+| **4** | OSM / CARTO tiles, Nominatim autocomplete, route/detail map, pickup/drop picker |
 | **5** | In-app chat UI |
 | **6** | Active trip map, live tracking, SOS UI |
 | **7** | Post-trip feedback (word chips), My Feedback inbox, trust color display |
@@ -249,6 +249,5 @@ Tracked separately from core phases; implement when prioritized:
 
 ## Not in scope yet
 
-- Implementation / `flutter create`
 - Store listing publish
 - Production signing keys

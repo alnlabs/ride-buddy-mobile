@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Ride Buddy",
+    "slug": "ridebuddy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logos/app_icon.png",
+    "scheme": "ridebuddy",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.alnlabs.ridebuddy",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Ride Buddy uses your location to fill From, bias place search, and show nearby rides."
+      }
+    },
+    "android": {
+      "package": "com.alnlabs.ridebuddy",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/logos/app_icon.png"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/logos/app_icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Ride Buddy uses your location to fill From, bias place search, and show nearby rides."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/logos/app_icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#E8F1FF"
+        }
+      ],
+      "expo-sharing",
+      "expo-image",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
